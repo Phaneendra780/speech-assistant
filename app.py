@@ -202,7 +202,8 @@ def main():
     # Check HTTPS status and show warning if needed
     https_check = """
     <script>
-    if (location.protocol !== 'https:' && !location.hostname.includes('localhost')) {
+    const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (!isSecure) {
         document.write('<div style="background: #ff6b6b; color: white; padding: 15px; border-radius: 10px; margin: 20px 0; text-align: center;"><strong>⚠️ HTTPS Required!</strong><br>Voice input needs HTTPS to work. Deploy to Streamlit Cloud or use localhost for testing.</div>');
     } else {
         document.write('<div style="background: #51cf66; color: white; padding: 10px; border-radius: 8px; margin: 10px 0; text-align: center;">✅ HTTPS Enabled - Voice should work!</div>');
@@ -293,8 +294,9 @@ def main():
             
             console.log('Speech result:', spokenText, 'Confidence:', confidence);
             
+            // FIXED: Accept even low confidence results
             if (spokenText.length > 0) {{
-                transcript.innerHTML = `You said: "${{spokenText}}" (confidence: ${{(confidence * 100).toFixed(0)}}%)`;
+                transcript.innerHTML = `You said: "${{spokenText}}" (confidence: ${{confidence ? (confidence * 100).toFixed(0) : 'N/A'}}%)`;
                 transcript.style.display = 'block';
                 status.innerHTML = '✅ Got it! Sending to Bob...';
                 
@@ -311,8 +313,9 @@ def main():
                         const url = new URL(window.location);
                         url.searchParams.set('voice_query', spokenText);
                         url.searchParams.set('ts', timestamp);
+                        console.log('Redirecting with voice query:', spokenText);
                         window.location.href = url.toString();
-                    }}, 1000);
+                    }}, 1500);
                 }} else {{
                     status.innerHTML = '⚠️ Already processing this input...';
                 }}
