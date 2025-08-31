@@ -3,6 +3,7 @@ from phi.agent import Agent
 from phi.model.google import Gemini
 from phi.tools.tavily import TavilyTools
 import time
+import urllib.parse
 
 # Set page configuration
 st.set_page_config(
@@ -68,6 +69,8 @@ def main():
     # Initialize session state
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
+    if 'voice_processed' not in st.session_state:
+        st.session_state.voice_processed = False
 
     # Custom CSS for better styling
     st.markdown("""
@@ -89,18 +92,119 @@ def main():
         color: #666;
         margin-bottom: 2rem;
     }
+    .voice-response {
+        background: #e8f5e8;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 4px solid #28a745;
+    }
     </style>
     """, unsafe_allow_html=True)
 
     # Header
     st.markdown('<div class="main-container">', unsafe_allow_html=True)
     st.markdown('<h1 class="title">🤖 Bob - Voice Assistant</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="subtitle">Let\'s first test if Bob works with text input</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Voice-enabled AI Assistant</p>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # Handle voice query from URL params - FIXED VERSION
+    voice_query = st.query_params.get("voice_query")
+    if voice_query and not st.session_state.voice_processed:
+        # Decode the voice query properly
+        try:
+            decoded_query = urllib.parse.unquote(voice_query)
+            st.info(f"🎙️ Voice Input: **{decoded_query}**")
+            
+            # Process the voice query
+            ai_response = get_ai_response(decoded_query)
+            
+            # Add to conversation history
+            st.session_state.conversation_history.append({
+                "user": decoded_query,
+                "bob": ai_response,
+                "timestamp": time.strftime("%H:%M:%S"),
+                "type": "voice"
+            })
+            
+            # Display response with special styling
+            st.markdown(f'<div class="voice-response"><strong>🤖 Bob:</strong> {ai_response}</div>', unsafe_allow_html=True)
+            
+            # Mark as processed to prevent reprocessing
+            st.session_state.voice_processed = True
+            
+            # Text-to-speech - IMPROVED VERSION
+            import streamlit.components.v1 as components
+            
+            # Clean the response for TTS
+            clean_response = ai_response.replace('"', "'").replace('\n', ' ').replace('`', '')
+            
+            tts_html = f"""
+            <div style="text-align: center; margin: 10px 0;">
+                <button id="playTTS" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                    🔊 Play Bob's Response
+                </button>
+                <div id="ttsStatus" style="margin-top: 10px; font-size: 14px;"></div>
+            </div>
+            
+            <script>
+            const response = `{clean_response}`;
+            
+            document.getElementById('playTTS').addEventListener('click', function() {{
+                if ('speechSynthesis' in window) {{
+                    // Stop any ongoing speech
+                    speechSynthesis.cancel();
+                    
+                    const utterance = new SpeechSynthesisUtterance(response);
+                    utterance.rate = 0.8;
+                    utterance.pitch = 1.0;
+                    utterance.volume = 1.0;
+                    
+                    utterance.onstart = function() {{
+                        document.getElementById('ttsStatus').innerHTML = '🔊 Speaking...';
+                    }};
+                    
+                    utterance.onend = function() {{
+                        document.getElementById('ttsStatus').innerHTML = '✅ Finished';
+                        setTimeout(() => {{
+                            document.getElementById('ttsStatus').innerHTML = '';
+                        }}, 2000);
+                    }};
+                    
+                    utterance.onerror = function(event) {{
+                        document.getElementById('ttsStatus').innerHTML = '❌ TTS Error: ' + event.error;
+                    }};
+                    
+                    speechSynthesis.speak(utterance);
+                }} else {{
+                    document.getElementById('ttsStatus').innerHTML = '❌ Text-to-speech not supported';
+                }}
+            }});
+            
+            // Auto-play the response
+            if ('speechSynthesis' in window) {{
+                setTimeout(() => {{
+                    const utterance = new SpeechSynthesisUtterance(response);
+                    utterance.rate = 0.8;
+                    speechSynthesis.speak(utterance);
+                }}, 500);
+            }}
+            </script>
+            """
+            
+            components.html(tts_html, height=80)
+            
+        except Exception as e:
+            st.error(f"❌ Error processing voice query: {e}")
+            st.write(f"Raw voice query: {voice_query}")
+    
+    # Reset the voice processed flag when URL params are cleared
+    if not voice_query and st.session_state.voice_processed:
+        st.session_state.voice_processed = False
+
     # Step 1: Test Bob with text input first
-    st.markdown("### 🧪 Step 1: Test Bob's AI Response")
-    st.markdown("Before troubleshooting voice, let's make sure Bob can answer questions:")
+    st.markdown("### 🧪 Test Bob's AI Response")
+    st.markdown("First, let's make sure Bob can answer questions:")
     
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -118,18 +222,18 @@ def main():
             try:
                 ai_response = get_ai_response(test_query)
                 st.success(f"✅ **Bob:** {ai_response}")
-                st.markdown("Great! Bob's AI is working. Now let's test voice...")
+                st.markdown("Great! Bob's AI is working. Now try voice...")
             except Exception as e:
                 st.error(f"❌ Bob's AI failed: {e}")
                 st.stop()
     
     # Step 2: Browser compatibility check
     st.markdown("---")
-    st.markdown("### 🌐 Step 2: Check Browser Compatibility")
+    st.markdown("### 🌐 Browser Compatibility Check")
     
     import streamlit.components.v1 as components
     
-    # Simple browser check
+    # Improved browser check
     browser_check_html = """
     <div style="padding: 20px; font-family: Arial, sans-serif;">
         <div id="browserInfo" style="padding: 15px; background: #f0f0f0; border-radius: 5px; margin: 10px 0;">
@@ -195,7 +299,7 @@ def main():
             testResults.innerHTML = '✅ <strong>SUCCESS:</strong> Microphone permission granted!';
             testResults.style.background = '#d4edda';
         } catch (error) {
-            testResults.innerHTML = `❌ <strong>FAILED:</strong> ${error.message}`;
+            testResults.innerHTML = `❌ <strong>FAILED:</strong> ${error.message}<br><small>Try: Allow microphone in browser settings</small>`;
             testResults.style.background = '#f8d7da';
         }
     });
@@ -225,7 +329,7 @@ def main():
         };
         
         recognition.onerror = function(event) {
-            testResults.innerHTML = `❌ <strong>ERROR:</strong> ${event.error}`;
+            testResults.innerHTML = `❌ <strong>ERROR:</strong> ${event.error}<br><small>Common fixes: Check microphone permissions, speak louder, use Chrome browser</small>`;
             testResults.style.background = '#f8d7da';
         };
         
@@ -245,61 +349,28 @@ def main():
     });
 
     // Initialize
-    document.addEventListener('DOMContentLoaded', function() {
-        checkBrowser();
-    });
+    checkBrowser();
     </script>
     """
     
-    components.html(browser_check_html, height=200)
+    components.html(browser_check_html, height=220)
     
-    # Step 3: Simple voice interface (only if tests pass)
+    # Step 3: Voice Interface - FIXED VERSION
     st.markdown("---")
-    st.markdown("### 🎙️ Step 3: Voice Interface")
-    st.markdown("If the tests above pass, try this simple voice interface:")
+    st.markdown("### 🎙️ Voice Interface")
     
-    # Handle voice query from URL params
-    voice_query = st.query_params.get("voice_query")
-    if voice_query:
-        st.info(f"🎙️ Processing: {voice_query}")
-        ai_response = get_ai_response(voice_query)
-        
-        st.session_state.conversation_history.append({
-            "user": voice_query,
-            "bob": ai_response,
-            "timestamp": time.strftime("%H:%M:%S")
-        })
-        
-        st.success(f"**Bob:** {ai_response}")
-        
-        # Text-to-speech
-        tts_html = f"""
-        <script>
-        const response = `{ai_response.replace('`', '').replace('"', '')}`;
-        const utterance = new SpeechSynthesisUtterance(response);
-        utterance.rate = 0.8;
-        speechSynthesis.speak(utterance);
-        
-        // Clear URL params
-        setTimeout(() => {{
-            const url = new URL(window.location);
-            url.searchParams.delete('voice_query');
-            history.replaceState(null, '', url);
-        }}, 1000);
-        </script>
-        """
-        components.html(tts_html, height=0)
-    
-    # Simple voice input
-    simple_voice_html = """
+    # Improved voice input with better error handling
+    voice_interface_html = """
     <div style="text-align: center; padding: 20px;">
-        <button id="voiceBtn" style="font-size: 80px; background: none; border: none; cursor: pointer; color: #4A90E2;">
+        <button id="voiceBtn" style="font-size: 80px; background: none; border: none; cursor: pointer; color: #4A90E2; transition: all 0.3s;">
             🎤
         </button>
-        <div id="voiceStatus" style="margin-top: 15px; font-size: 16px;">
-            Click microphone to start
+        <div id="voiceStatus" style="margin-top: 15px; font-size: 16px; min-height: 20px;">
+            Click microphone to ask Bob something
         </div>
-        <div id="voiceResult" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; display: none;">
+        <div id="voiceResult" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; display: none; font-style: italic;">
+        </div>
+        <div id="debugInfo" style="margin-top: 10px; font-size: 12px; color: #666; display: none;">
         </div>
     </div>
 
@@ -308,12 +379,21 @@ def main():
     let isListening = false;
 
     document.getElementById('voiceBtn').addEventListener('click', function() {
+        // Debug info
+        const debugDiv = document.getElementById('debugInfo');
+        debugDiv.style.display = 'block';
+        debugDiv.innerHTML = 'Debug: Button clicked, checking compatibility...';
+        
         if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-            document.getElementById('voiceStatus').innerHTML = '❌ Speech recognition not supported';
+            document.getElementById('voiceStatus').innerHTML = '❌ Speech recognition not supported in this browser';
+            debugDiv.innerHTML = 'Debug: Speech API not found';
             return;
         }
 
-        if (isListening) return;
+        if (isListening) {
+            debugDiv.innerHTML = 'Debug: Already listening, ignoring click';
+            return;
+        }
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SpeechRecognition();
@@ -321,46 +401,97 @@ def main():
         recognition.continuous = false;
         recognition.interimResults = false;
         recognition.lang = 'en-US';
+        recognition.maxAlternatives = 1;
 
         recognition.onstart = function() {
             isListening = true;
             document.getElementById('voiceBtn').style.color = '#E74C3C';
+            document.getElementById('voiceBtn').style.transform = 'scale(1.1)';
             document.getElementById('voiceStatus').innerHTML = '🎤 Listening... Speak now!';
+            document.getElementById('voiceResult').style.display = 'none';
+            debugDiv.innerHTML = 'Debug: Recognition started successfully';
         };
 
         recognition.onresult = function(event) {
-            const query = event.results[0][0].transcript;
-            document.getElementById('voiceResult').style.display = 'block';
-            document.getElementById('voiceResult').innerHTML = 'You said: "' + query + '"';
+            const query = event.results[0][0].transcript.trim();
+            const confidence = event.results[0][0].confidence;
             
-            // Redirect with query
-            const url = new URL(window.location);
-            url.searchParams.set('voice_query', encodeURIComponent(query));
-            window.location.href = url.toString();
+            debugDiv.innerHTML = `Debug: Got result "${query}" (confidence: ${confidence})`;
+            
+            document.getElementById('voiceResult').style.display = 'block';
+            document.getElementById('voiceResult').innerHTML = `You said: "${query}"`;
+            document.getElementById('voiceStatus').innerHTML = '✅ Processing your question...';
+            
+            // Small delay to show the recognized text
+            setTimeout(() => {
+                // Properly encode the query for URL
+                const encodedQuery = encodeURIComponent(query);
+                const url = new URL(window.location);
+                url.searchParams.set('voice_query', encodedQuery);
+                
+                debugDiv.innerHTML = `Debug: Redirecting with query: ${encodedQuery}`;
+                
+                // Force page reload with new parameters
+                window.location.href = url.toString();
+            }, 1000);
         };
 
         recognition.onerror = function(event) {
-            document.getElementById('voiceStatus').innerHTML = '❌ Error: ' + event.error;
+            const errorMsg = event.error;
+            document.getElementById('voiceStatus').innerHTML = `❌ Speech Error: ${errorMsg}`;
             document.getElementById('voiceBtn').style.color = '#4A90E2';
+            document.getElementById('voiceBtn').style.transform = 'scale(1)';
             isListening = false;
+            
+            debugDiv.innerHTML = `Debug: Speech error - ${errorMsg}`;
+            
+            // Provide helpful error messages
+            let helpText = '';
+            switch(errorMsg) {
+                case 'not-allowed':
+                    helpText = 'Please allow microphone access in your browser';
+                    break;
+                case 'no-speech':
+                    helpText = 'No speech detected. Try speaking louder or closer to mic';
+                    break;
+                case 'network':
+                    helpText = 'Network error. Check your internet connection';
+                    break;
+                case 'audio-capture':
+                    helpText = 'Microphone not working. Check device settings';
+                    break;
+                default:
+                    helpText = 'Try again or use text input below';
+            }
+            
+            setTimeout(() => {
+                document.getElementById('voiceStatus').innerHTML = helpText;
+            }, 2000);
         };
 
         recognition.onend = function() {
             document.getElementById('voiceBtn').style.color = '#4A90E2';
-            document.getElementById('voiceStatus').innerHTML = 'Click microphone to try again';
+            document.getElementById('voiceBtn').style.transform = 'scale(1)';
             isListening = false;
+            
+            if (document.getElementById('voiceStatus').innerHTML.includes('Listening')) {
+                document.getElementById('voiceStatus').innerHTML = '⚠️ No speech detected. Try again.';
+                debugDiv.innerHTML = 'Debug: Recognition ended without result';
+            }
         };
 
         try {
+            debugDiv.innerHTML = 'Debug: Starting recognition...';
             recognition.start();
         } catch (error) {
             document.getElementById('voiceStatus').innerHTML = '❌ Could not start: ' + error.message;
+            debugDiv.innerHTML = `Debug: Start error - ${error.message}`;
         }
     });
     </script>
     """
     
-    components.html(simple_voice_html, height=180)
+    components.html(voice_interface_html, height=200)
     
     # Regular text input for comparison
     st.markdown("---")
@@ -373,7 +504,8 @@ def main():
         st.session_state.conversation_history.append({
             "user": text_query,
             "bob": ai_response,
-            "timestamp": time.strftime("%H:%M:%S")
+            "timestamp": time.strftime("%H:%M:%S"),
+            "type": "text"
         })
         st.write(f"**Bob:** {ai_response}")
     
@@ -386,22 +518,31 @@ def main():
         st.write("**Current URL Parameters:**")
         for key, value in st.query_params.items():
             st.write(f"- {key}: {value}")
+            if key == "voice_query":
+                decoded = urllib.parse.unquote(value)
+                st.write(f"  - Decoded: {decoded}")
+    else:
+        st.write("**No URL parameters found**")
+    
+    # Session state info
+    st.write(f"**Voice Processed:** {st.session_state.voice_processed}")
     
     # Environment check
-    st.markdown("**Expected Browser Requirements:**")
+    st.markdown("**Browser Requirements:**")
     st.markdown("- ✅ Chrome (best support)")
     st.markdown("- ✅ Edge (good support)")  
     st.markdown("- ✅ Safari (basic support)")
     st.markdown("- ❌ Firefox (not supported)")
     st.markdown("- ✅ HTTPS or localhost required")
     
-    # Conversation history
+    # Conversation history with type indicators
     if st.session_state.conversation_history:
         st.markdown("---")
         st.subheader("💬 Recent Conversations")
         
-        for i, conv in enumerate(reversed(st.session_state.conversation_history[-3:])):
-            with st.expander(f"Conversation {len(st.session_state.conversation_history) - i} - {conv['timestamp']}"):
+        for i, conv in enumerate(reversed(st.session_state.conversation_history[-5:])):
+            voice_icon = "🎙️" if conv.get('type') == 'voice' else "⌨️"
+            with st.expander(f"{voice_icon} Conversation {len(st.session_state.conversation_history) - i} - {conv['timestamp']}"):
                 st.write(f"**You:** {conv['user']}")
                 st.write(f"**Bob:** {conv['bob']}")
     
@@ -409,6 +550,7 @@ def main():
     if st.session_state.conversation_history:
         if st.button("🗑️ Clear History"):
             st.session_state.conversation_history = []
+            st.session_state.voice_processed = False
             st.rerun()
 
 if __name__ == "__main__":
