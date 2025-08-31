@@ -196,6 +196,9 @@ def main():
     st.markdown("---")
     st.markdown("**🎙️ Step 2: Voice Interface**")
 
+    # Display voice conversation area FIRST
+    voice_container = st.container()
+    
     import streamlit.components.v1 as components
     
     # FIXED: Better voice component with proper error handling
@@ -377,6 +380,59 @@ def main():
     """
     
     components.html(voice_component, height=280)
+
+    # VOICE OUTPUT DISPLAY SECTION
+    st.markdown("### 🎯 Voice Conversation")
+    
+    # Show the latest voice conversation if any
+    if st.session_state.conversation_history:
+        latest_voice_convs = [conv for conv in reversed(st.session_state.conversation_history) 
+                             if conv.get('type') in ['voice', 'manual_voice']][:1]
+        
+        if latest_voice_convs:
+            conv = latest_voice_convs[0]
+            st.markdown(f'<div class="voice-input">🎙️ <strong>You said:</strong> "{conv["user"]}"</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="voice-response">🤖 <strong>Bob replied:</strong><br><br>{conv["bob"]}</div>', unsafe_allow_html=True)
+            
+            # Add TTS for the latest voice response
+            clean_text = conv["bob"].replace('"', "'").replace('\n', ' ').replace('`', '').replace('*', '')[:300]
+            
+            tts_html = f"""
+            <div style="text-align: center; margin: 20px 0;">
+                <button onclick="playLatestResponse()" style="padding: 15px 30px; background: #28a745; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 18px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                    🔊 Play Bob's Latest Response
+                </button>
+                <div id="playLatestStatus" style="margin-top: 10px; font-size: 14px;"></div>
+            </div>
+            
+            <script>
+            function playLatestResponse() {{
+                const text = `{clean_text}`;
+                if ('speechSynthesis' in window) {{
+                    speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 0.85;
+                    utterance.pitch = 1.0;
+                    
+                    utterance.onstart = () => document.getElementById('playLatestStatus').innerHTML = '🔊 Playing...';
+                    utterance.onend = () => {{
+                        document.getElementById('playLatestStatus').innerHTML = '✅ Finished';
+                        setTimeout(() => document.getElementById('playLatestStatus').innerHTML = '', 2000);
+                    }};
+                    
+                    speechSynthesis.speak(utterance);
+                }} else {{
+                    document.getElementById('playLatestStatus').innerHTML = '❌ TTS not supported';
+                }}
+            }}
+            </script>
+            """
+            
+            components.html(tts_html, height=100)
+        else:
+            st.info("🎙️ No voice conversations yet. Click the microphone above to start!")
+    else:
+        st.info("💬 Start a conversation with Bob using voice or text input above!")
 
     # Manual text input
     st.markdown("---")
