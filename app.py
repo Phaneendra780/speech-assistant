@@ -3,7 +3,6 @@ from phi.agent import Agent
 from phi.model.google import Gemini
 from phi.tools.tavily import TavilyTools
 import time
-import streamlit.components.v1 as components
 
 # Set page configuration
 st.set_page_config(
@@ -65,404 +64,10 @@ def get_ai_response(query):
         st.error(f"🚨 Error getting AI response: {e}")
         return "Sorry, I encountered an error while processing your question."
 
-def create_voice_interface():
-    """Create the web-based voice interface using HTML5 Speech Recognition."""
-    html_code = '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            .voice-container {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                padding: 20px;
-                font-family: Arial, sans-serif;
-            }
-            .microphone {
-                font-size: 120px;
-                cursor: pointer;
-                transition: all 0.3s ease;
-                border: none;
-                background: none;
-                color: #4A90E2;
-                padding: 20px;
-                border-radius: 50%;
-                box-shadow: 0 4px 15px rgba(74, 144, 226, 0.3);
-            }
-            .microphone:hover {
-                transform: scale(1.1);
-                color: #357ABD;
-                box-shadow: 0 6px 20px rgba(74, 144, 226, 0.4);
-            }
-            .microphone:disabled {
-                color: #ccc;
-                cursor: not-allowed;
-                transform: none;
-            }
-            .microphone.listening {
-                color: #E74C3C;
-                animation: pulse 1.5s infinite;
-                box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
-            }
-            .microphone.processing {
-                color: #F39C12;
-                box-shadow: 0 6px 20px rgba(243, 156, 18, 0.4);
-            }
-            @keyframes pulse {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.2); }
-                100% { transform: scale(1); }
-            }
-            .status {
-                margin-top: 20px;
-                font-size: 18px;
-                text-align: center;
-                min-height: 25px;
-                color: #333;
-            }
-            .transcript {
-                margin-top: 20px;
-                padding: 15px;
-                background: #f8f9fa;
-                border-radius: 10px;
-                max-width: 500px;
-                text-align: center;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }
-            .wake-word-status {
-                margin-top: 10px;
-                padding: 10px;
-                border-radius: 5px;
-                text-align: center;
-                font-weight: bold;
-            }
-            .wake-detected {
-                background: #d4edda;
-                color: #155724;
-                border: 1px solid #c3e6cb;
-            }
-            .wake-waiting {
-                background: #fff3cd;
-                color: #856404;
-                border: 1px solid #ffeaa7;
-            }
-            .debug-info {
-                margin-top: 15px;
-                padding: 10px;
-                background: #f1f1f1;
-                border-radius: 5px;
-                font-size: 12px;
-                color: #666;
-                max-width: 500px;
-                word-wrap: break-word;
-            }
-            .error-info {
-                background: #f8d7da;
-                color: #721c24;
-                border: 1px solid #f5c6cb;
-            }
-            .success-info {
-                background: #d1ecf1;
-                color: #0c5460;
-                border: 1px solid #bee5eb;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="voice-container">
-            <button class="microphone" id="micButton">🎤</button>
-            <div class="status" id="status">Checking browser compatibility...</div>
-            <div class="wake-word-status wake-waiting" id="wakeStatus">Initializing...</div>
-            <div class="debug-info" id="debugInfo">Loading...</div>
-            <div class="transcript" id="transcript" style="display: none;"></div>
-        </div>
-
-        <script>
-            let recognition;
-            let isListening = false;
-            let wakeWordDetected = false;
-            let permissionGranted = false;
-            
-            const micButton = document.getElementById('micButton');
-            const status = document.getElementById('status');
-            const transcript = document.getElementById('transcript');
-            const wakeStatus = document.getElementById('wakeStatus');
-            const debugInfo = document.getElementById('debugInfo');
-
-            function updateDebugInfo(message, isError) {
-                console.log('Debug:', message);
-                const timestamp = new Date().toLocaleTimeString();
-                debugInfo.textContent = timestamp + ': ' + message;
-                if (isError) {
-                    debugInfo.className = 'debug-info error-info';
-                } else {
-                    debugInfo.className = 'debug-info success-info';
-                }
-            }
-
-            // Check browser compatibility
-            function checkBrowserSupport() {
-                const userAgent = navigator.userAgent;
-                let browserInfo = '';
-                
-                if (userAgent.includes('Chrome')) {
-                    browserInfo = 'Chrome detected - Good!';
-                } else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) {
-                    browserInfo = 'Safari detected - Should work';
-                } else if (userAgent.includes('Edge')) {
-                    browserInfo = 'Edge detected - Should work';
-                } else if (userAgent.includes('Firefox')) {
-                    browserInfo = 'Firefox detected - NOT SUPPORTED';
-                } else {
-                    browserInfo = 'Unknown browser - May not work';
-                }
-                
-                const isSecure = window.location.protocol === 'https:' || 
-                               window.location.hostname === 'localhost' || 
-                               window.location.hostname === '127.0.0.1';
-                const protocolInfo = isSecure ? 'Secure connection - Good!' : 'HTTPS required for microphone';
-                
-                updateDebugInfo(browserInfo + ', ' + protocolInfo, !isSecure);
-                
-                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                    updateDebugInfo('Speech Recognition API available');
-                    return true;
-                } else {
-                    updateDebugInfo('Speech Recognition API NOT available', true);
-                    status.textContent = 'Speech recognition not supported. Use Chrome, Edge, or Safari with HTTPS.';
-                    micButton.disabled = true;
-                    return false;
-                }
-            }
-
-            // Function to check and request microphone permission
-            async function requestMicrophonePermission() {
-                updateDebugInfo('Requesting microphone permission...');
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    stream.getTracks().forEach(track => track.stop());
-                    permissionGranted = true;
-                    updateDebugInfo('Microphone permission GRANTED');
-                    return true;
-                } catch (error) {
-                    updateDebugInfo('Microphone permission DENIED: ' + error.message, true);
-                    status.textContent = 'Microphone access denied. Please allow access and refresh.';
-                    return false;
-                }
-            }
-
-            // Initialize speech recognition
-            function initializeSpeechRecognition() {
-                try {
-                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    recognition = new SpeechRecognition();
-                    
-                    recognition.continuous = false;
-                    recognition.interimResults = false;
-                    recognition.lang = 'en-US';
-
-                    recognition.onstart = function() {
-                        isListening = true;
-                        micButton.classList.add('listening');
-                        updateDebugInfo('Speech recognition STARTED successfully');
-                        
-                        if (!wakeWordDetected) {
-                            status.textContent = 'Listening for "Hey Bob"...';
-                            wakeStatus.textContent = 'Say "Hey Bob" now...';
-                        } else {
-                            status.textContent = 'I am listening... What can I help you with?';
-                        }
-                    };
-
-                    recognition.onresult = function(event) {
-                        const result = event.results[0];
-                        const text = result[0].transcript.toLowerCase().trim();
-                        const confidence = result[0].confidence || 0;
-                        
-                        updateDebugInfo('Heard: "' + text + '" (confidence: ' + confidence.toFixed(2) + ')');
-                        
-                        if (!wakeWordDetected) {
-                            // Check for wake word
-                            if (text.includes('hey bob') || text.includes('hi bob') || text.includes('hello bob')) {
-                                wakeWordDetected = true;
-                                wakeStatus.textContent = 'Wake word detected! Ask your question...';
-                                wakeStatus.className = 'wake-word-status wake-detected';
-                                status.textContent = 'Great! Now ask me anything...';
-                                
-                                updateDebugInfo('Wake word DETECTED, preparing for query...');
-                                
-                                // Speak confirmation
-                                const utterance = new SpeechSynthesisUtterance('Hello! What can I help you with?');
-                                utterance.rate = 0.8;
-                                speechSynthesis.speak(utterance);
-                                
-                                // Start listening for the actual query after confirmation
-                                setTimeout(function() {
-                                    if (recognition && !isListening) {
-                                        try {
-                                            recognition.start();
-                                        } catch (error) {
-                                            updateDebugInfo('Error restarting recognition: ' + error.message, true);
-                                        }
-                                    }
-                                }, 2500);
-                            } else {
-                                status.textContent = 'I heard: "' + result[0].transcript + '" - Please say "Hey Bob"';
-                                setTimeout(function() {
-                                    status.textContent = 'Click the microphone and say "Hey Bob"';
-                                }, 3000);
-                            }
-                        } else {
-                            // Process the actual query
-                            const query = result[0].transcript;
-                            transcript.style.display = 'block';
-                            transcript.innerHTML = '<strong>You said:</strong> ' + query;
-                            
-                            updateDebugInfo('Processing query: "' + query + '"');
-                            
-                            // Store in window for Streamlit to access
-                            window.currentVoiceQuery = query;
-                            window.queryTimestamp = Date.now();
-                            
-                            // Trigger Streamlit rerun by modifying a query parameter
-                            const url = new URL(window.location);
-                            url.searchParams.set('voice_query', encodeURIComponent(query));
-                            url.searchParams.set('voice_timestamp', Date.now().toString());
-                            window.location.href = url.toString();
-                        }
-                    };
-
-                    recognition.onerror = function(event) {
-                        console.error('Speech recognition error:', event.error);
-                        updateDebugInfo('Speech ERROR: ' + event.error, true);
-                        
-                        let errorMessage = 'Please try again.';
-                        
-                        switch(event.error) {
-                            case 'not-allowed':
-                            case 'permission-denied':
-                                errorMessage = 'Microphone permission denied. Please allow access and refresh.';
-                                permissionGranted = false;
-                                break;
-                            case 'no-speech':
-                                errorMessage = 'No speech detected. Try speaking louder.';
-                                break;
-                            case 'audio-capture':
-                                errorMessage = 'No microphone found. Please check your microphone.';
-                                break;
-                            case 'network':
-                                errorMessage = 'Network error. Check your internet connection.';
-                                break;
-                        }
-                        
-                        status.textContent = 'Error: ' + event.error + '. ' + errorMessage;
-                        micButton.classList.remove('listening', 'processing');
-                        isListening = false;
-                    };
-
-                    recognition.onend = function() {
-                        micButton.classList.remove('listening');
-                        isListening = false;
-                        updateDebugInfo('Speech recognition ENDED');
-                        
-                        if (!wakeWordDetected) {
-                            status.textContent = 'Click the microphone and say "Hey Bob"';
-                        }
-                    };
-
-                    updateDebugInfo('Speech recognition INITIALIZED successfully');
-                } catch (error) {
-                    updateDebugInfo('Error initializing speech recognition: ' + error.message, true);
-                }
-            }
-
-            // Microphone button click handler
-            micButton.addEventListener('click', async function() {
-                updateDebugInfo('Microphone button CLICKED');
-                
-                if (!permissionGranted) {
-                    status.textContent = 'Requesting microphone permission...';
-                    const granted = await requestMicrophonePermission();
-                    if (!granted) {
-                        return;
-                    }
-                    initializeSpeechRecognition();
-                    setTimeout(function() {
-                        status.textContent = 'Click the microphone and say "Hey Bob"';
-                        wakeStatus.textContent = 'Waiting for "Hey Bob"...';
-                    }, 1000);
-                } else if (!isListening && recognition) {
-                    try {
-                        recognition.start();
-                    } catch (error) {
-                        updateDebugInfo('Error starting recognition: ' + error.message, true);
-                        status.textContent = 'Error starting microphone. Please refresh and try again.';
-                    }
-                } else {
-                    updateDebugInfo('Button clicked but already listening or no recognition object');
-                }
-            });
-
-            // Listen for responses from Streamlit
-            window.addEventListener('message', function(event) {
-                if (event.data && event.data.type === 'bot_response') {
-                    status.textContent = 'Bob is speaking...';
-                    updateDebugInfo('Received response from Streamlit');
-                    
-                    // Clean the response for speech
-                    let responseText = event.data.response;
-                    responseText = responseText.replace(/[*#`]/g, ''); // Remove markdown
-                    responseText = responseText.replace(/\\n/g, ' '); // Replace newlines with spaces
-                    responseText = responseText.replace(/\\s+/g, ' '); // Clean whitespace
-                    responseText = responseText.trim();
-                    
-                    // Speak the response
-                    const utterance = new SpeechSynthesisUtterance(responseText);
-                    utterance.rate = 0.8;
-                    utterance.pitch = 1;
-                    utterance.volume = 0.8;
-                    
-                    utterance.onend = function() {
-                        // Reset for next interaction
-                        wakeWordDetected = false;
-                        wakeStatus.textContent = 'Waiting for "Hey Bob"...';
-                        wakeStatus.className = 'wake-word-status wake-waiting';
-                        status.textContent = 'Click the microphone and say "Hey Bob"';
-                        micButton.classList.remove('processing');
-                        transcript.style.display = 'none';
-                        updateDebugInfo('Ready for next interaction');
-                    };
-                    
-                    speechSynthesis.speak(utterance);
-                }
-            });
-
-            // Initialize on page load
-            document.addEventListener('DOMContentLoaded', function() {
-                updateDebugInfo('Page loaded, checking browser support...');
-                
-                if (checkBrowserSupport()) {
-                    status.textContent = 'Click the microphone to start';
-                    wakeStatus.textContent = 'Ready - Click microphone first';
-                    wakeStatus.className = 'wake-word-status wake-waiting';
-                } else {
-                    wakeStatus.textContent = 'Browser not supported';
-                    wakeStatus.className = 'wake-word-status error-info';
-                }
-            });
-        </script>
-    </body>
-    </html>
-    '''
-    return html_code
-
 def main():
     # Initialize session state
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
-    if 'processed_queries' not in st.session_state:
-        st.session_state.processed_queries = set()
 
     # Custom CSS for better styling
     st.markdown("""
@@ -490,183 +95,311 @@ def main():
     # Header
     st.markdown('<div class="main-container">', unsafe_allow_html=True)
     st.markdown('<h1 class="title">🤖 Bob - Voice Assistant</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="subtitle">Say "Hey Bob" then ask your question</p>', unsafe_allow_html=True)
-    
-    # Voice interface
-    voice_html = create_voice_interface()
-    components.html(voice_html, height=450, key="voice_interface")
-    
+    st.markdown('<p class="subtitle">Let\'s first test if Bob works with text input</p>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Handle voice queries from URL parameters
-    voice_query = st.query_params.get("voice_query")
-    voice_timestamp = st.query_params.get("voice_timestamp")
-    
-    if voice_query and voice_timestamp:
-        # Decode the query
-        import urllib.parse
-        decoded_query = urllib.parse.unquote(voice_query)
-        
-        # Check if this is a new query
-        query_id = f"{decoded_query}_{voice_timestamp}"
-        if query_id not in st.session_state.processed_queries:
-            # Mark as processed
-            st.session_state.processed_queries.add(query_id)
-            
-            # Show what we're processing
-            st.info(f"🎙️ Processing voice query: '{decoded_query}'")
-            
-            # Get AI response
-            ai_response = get_ai_response(decoded_query)
-            
-            # Add to conversation history
-            st.session_state.conversation_history.append({
-                "user": decoded_query,
-                "bob": ai_response,
-                "timestamp": time.strftime("%H:%M:%S")
-            })
-            
-            # Clean response for JavaScript
-            clean_response = ai_response.replace('"', '\\"').replace("'", "\\'").replace('\n', ' ').replace('\r', '')
-            
-            # Send response back to JavaScript for speech synthesis
-            response_js = f'''
-            <script>
-            console.log('Sending response to iframe...');
-            const iframe = document.querySelector('iframe[title="voice_interface"]');
-            if (iframe && iframe.contentWindow) {{
-                iframe.contentWindow.postMessage({{
-                    type: 'bot_response',
-                    response: "{clean_response}"
-                }}, '*');
-                console.log('Response sent to iframe');
-            }} else {{
-                console.error('Could not find iframe or iframe content window');
-            }}
-            
-            // Clear URL parameters after processing
-            setTimeout(function() {{
-                const url = new URL(window.location);
-                url.searchParams.delete('voice_query');
-                url.searchParams.delete('voice_timestamp');
-                history.replaceState(null, '', url.toString());
-            }}, 100);
-            </script>
-            '''
-            components.html(response_js, height=0)
-    
-    # Simple text input as backup for testing
-    st.markdown("---")
-    st.markdown("### 💬 Alternative: Text Input (for testing)")
+
+    # Step 1: Test Bob with text input first
+    st.markdown("### 🧪 Step 1: Test Bob's AI Response")
+    st.markdown("Before troubleshooting voice, let's make sure Bob can answer questions:")
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        text_query = st.text_input("Type your question here:", placeholder="What can Bob help you with?", key="text_input")
+        test_query = st.text_input(
+            "Ask Bob a simple question:", 
+            placeholder="What is 2 + 2?",
+            key="test_query"
+        )
     
     with col2:
-        ask_button = st.button("Ask Bob", type="primary")
+        test_button = st.button("Test Bob", type="primary")
     
-    if ask_button and text_query:
+    if test_button and test_query:
+        with st.spinner("Testing Bob's response..."):
+            try:
+                ai_response = get_ai_response(test_query)
+                st.success(f"✅ **Bob:** {ai_response}")
+                st.markdown("Great! Bob's AI is working. Now let's test voice...")
+            except Exception as e:
+                st.error(f"❌ Bob's AI failed: {e}")
+                st.stop()
+    
+    # Step 2: Browser compatibility check
+    st.markdown("---")
+    st.markdown("### 🌐 Step 2: Check Browser Compatibility")
+    
+    import streamlit.components.v1 as components
+    
+    # Simple browser check
+    browser_check_html = """
+    <div style="padding: 20px; font-family: Arial, sans-serif;">
+        <div id="browserInfo" style="padding: 15px; background: #f0f0f0; border-radius: 5px; margin: 10px 0;">
+            Checking browser compatibility...
+        </div>
+        <button id="testMic" style="padding: 10px 20px; background: #4A90E2; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 5px;">
+            Test Microphone Permission
+        </button>
+        <button id="testSpeech" style="padding: 10px 20px; background: #E74C3C; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 5px;">
+            Test Speech Recognition
+        </button>
+        <div id="testResults" style="padding: 15px; margin-top: 10px; background: #fff; border: 1px solid #ddd; border-radius: 5px;">
+            Click buttons above to test functionality
+        </div>
+    </div>
+
+    <script>
+    const browserInfo = document.getElementById('browserInfo');
+    const testResults = document.getElementById('testResults');
+    const testMic = document.getElementById('testMic');
+    const testSpeech = document.getElementById('testSpeech');
+
+    // Check browser compatibility
+    function checkBrowser() {
+        const ua = navigator.userAgent;
+        let browser = 'Unknown';
+        let supported = false;
+        
+        if (ua.includes('Chrome') && !ua.includes('Edge')) {
+            browser = 'Chrome';
+            supported = true;
+        } else if (ua.includes('Safari') && !ua.includes('Chrome')) {
+            browser = 'Safari';
+            supported = true;
+        } else if (ua.includes('Edge')) {
+            browser = 'Edge';
+            supported = true;
+        } else if (ua.includes('Firefox')) {
+            browser = 'Firefox';
+            supported = false;
+        }
+        
+        const isSecure = location.protocol === 'https:' || location.hostname === 'localhost';
+        const hasAPI = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+        
+        let status = supported ? '✅' : '❌';
+        browserInfo.innerHTML = `
+            ${status} <strong>${browser}</strong> | 
+            ${isSecure ? '✅' : '❌'} ${location.protocol} | 
+            ${hasAPI ? '✅' : '❌'} Speech API
+        `;
+        browserInfo.style.background = supported && isSecure && hasAPI ? '#d4edda' : '#f8d7da';
+        
+        return supported && isSecure && hasAPI;
+    }
+
+    // Test microphone permission
+    testMic.addEventListener('click', async function() {
+        testResults.innerHTML = 'Testing microphone permission...';
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
+            testResults.innerHTML = '✅ <strong>SUCCESS:</strong> Microphone permission granted!';
+            testResults.style.background = '#d4edda';
+        } catch (error) {
+            testResults.innerHTML = `❌ <strong>FAILED:</strong> ${error.message}`;
+            testResults.style.background = '#f8d7da';
+        }
+    });
+
+    // Test speech recognition
+    testSpeech.addEventListener('click', function() {
+        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+            testResults.innerHTML = '❌ <strong>FAILED:</strong> Speech Recognition API not available';
+            testResults.style.background = '#f8d7da';
+            return;
+        }
+        
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+        
+        testResults.innerHTML = '🎤 <strong>LISTENING:</strong> Say something...';
+        testResults.style.background = '#fff3cd';
+        
+        recognition.onresult = function(event) {
+            const text = event.results[0][0].transcript;
+            testResults.innerHTML = `✅ <strong>SUCCESS:</strong> I heard "${text}"`;
+            testResults.style.background = '#d4edda';
+        };
+        
+        recognition.onerror = function(event) {
+            testResults.innerHTML = `❌ <strong>ERROR:</strong> ${event.error}`;
+            testResults.style.background = '#f8d7da';
+        };
+        
+        recognition.onend = function() {
+            if (testResults.innerHTML.includes('LISTENING')) {
+                testResults.innerHTML = '⚠️ <strong>NO SPEECH:</strong> Try speaking louder or closer to microphone';
+                testResults.style.background = '#fff3cd';
+            }
+        };
+        
+        try {
+            recognition.start();
+        } catch (error) {
+            testResults.innerHTML = `❌ <strong>START ERROR:</strong> ${error.message}`;
+            testResults.style.background = '#f8d7da';
+        }
+    });
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+        checkBrowser();
+    });
+    </script>
+    """
+    
+    components.html(browser_check_html, height=200)
+    
+    # Step 3: Simple voice interface (only if tests pass)
+    st.markdown("---")
+    st.markdown("### 🎙️ Step 3: Voice Interface")
+    st.markdown("If the tests above pass, try this simple voice interface:")
+    
+    # Handle voice query from URL params
+    voice_query = st.query_params.get("voice_query")
+    if voice_query:
+        st.info(f"🎙️ Processing: {voice_query}")
+        ai_response = get_ai_response(voice_query)
+        
+        st.session_state.conversation_history.append({
+            "user": voice_query,
+            "bob": ai_response,
+            "timestamp": time.strftime("%H:%M:%S")
+        })
+        
+        st.success(f"**Bob:** {ai_response}")
+        
+        # Text-to-speech
+        tts_html = f"""
+        <script>
+        const response = `{ai_response.replace('`', '').replace('"', '')}`;
+        const utterance = new SpeechSynthesisUtterance(response);
+        utterance.rate = 0.8;
+        speechSynthesis.speak(utterance);
+        
+        // Clear URL params
+        setTimeout(() => {{
+            const url = new URL(window.location);
+            url.searchParams.delete('voice_query');
+            history.replaceState(null, '', url);
+        }}, 1000);
+        </script>
+        """
+        components.html(tts_html, height=0)
+    
+    # Simple voice input
+    simple_voice_html = """
+    <div style="text-align: center; padding: 20px;">
+        <button id="voiceBtn" style="font-size: 80px; background: none; border: none; cursor: pointer; color: #4A90E2;">
+            🎤
+        </button>
+        <div id="voiceStatus" style="margin-top: 15px; font-size: 16px;">
+            Click microphone to start
+        </div>
+        <div id="voiceResult" style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; display: none;">
+        </div>
+    </div>
+
+    <script>
+    let recognition;
+    let isListening = false;
+
+    document.getElementById('voiceBtn').addEventListener('click', function() {
+        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+            document.getElementById('voiceStatus').innerHTML = '❌ Speech recognition not supported';
+            return;
+        }
+
+        if (isListening) return;
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = function() {
+            isListening = true;
+            document.getElementById('voiceBtn').style.color = '#E74C3C';
+            document.getElementById('voiceStatus').innerHTML = '🎤 Listening... Speak now!';
+        };
+
+        recognition.onresult = function(event) {
+            const query = event.results[0][0].transcript;
+            document.getElementById('voiceResult').style.display = 'block';
+            document.getElementById('voiceResult').innerHTML = 'You said: "' + query + '"';
+            
+            // Redirect with query
+            const url = new URL(window.location);
+            url.searchParams.set('voice_query', encodeURIComponent(query));
+            window.location.href = url.toString();
+        };
+
+        recognition.onerror = function(event) {
+            document.getElementById('voiceStatus').innerHTML = '❌ Error: ' + event.error;
+            document.getElementById('voiceBtn').style.color = '#4A90E2';
+            isListening = false;
+        };
+
+        recognition.onend = function() {
+            document.getElementById('voiceBtn').style.color = '#4A90E2';
+            document.getElementById('voiceStatus').innerHTML = 'Click microphone to try again';
+            isListening = false;
+        };
+
+        try {
+            recognition.start();
+        } catch (error) {
+            document.getElementById('voiceStatus').innerHTML = '❌ Could not start: ' + error.message;
+        }
+    });
+    </script>
+    """
+    
+    components.html(simple_voice_html, height=180)
+    
+    # Regular text input for comparison
+    st.markdown("---")
+    st.markdown("### 💬 Text Input (Backup)")
+    
+    text_query = st.text_input("Type your question:", placeholder="What can Bob help you with?")
+    
+    if st.button("Ask Bob") and text_query:
         ai_response = get_ai_response(text_query)
         st.session_state.conversation_history.append({
             "user": text_query,
             "bob": ai_response,
             "timestamp": time.strftime("%H:%M:%S")
         })
-        st.success(f"**Bob:** {ai_response}")
-        
-        # Clear the text input
-        st.rerun()
+        st.write(f"**Bob:** {ai_response}")
     
-    # Troubleshooting section
+    # Debugging info
     st.markdown("---")
-    st.markdown("### 🔧 Troubleshooting Guide")
+    st.markdown("### 🔍 Debug Information")
     
-    col1, col2 = st.columns(2)
+    # Show current URL params for debugging
+    if st.query_params:
+        st.write("**Current URL Parameters:**")
+        for key, value in st.query_params.items():
+            st.write(f"- {key}: {value}")
     
-    with col1:
-        st.markdown("""
-        **Common Issues:**
-        1. **Wrong Browser** - Firefox doesn't work, use Chrome
-        2. **Permission Blocked** - Allow microphone when prompted
-        3. **HTTP Connection** - Must use HTTPS or localhost
-        4. **No Microphone** - Check device has working microphone
-        5. **Pop-up Blocked** - Allow pop-ups for permission requests
-        """)
-    
-    with col2:
-        st.markdown("""
-        **What to Check:**
-        - 🔍 Look at debug info in voice interface
-        - 🎙️ Click "Test Microphone" button below
-        - 🔧 Open browser console (F12) for errors
-        - 💬 Try text input to test Bob's responses
-        - 🔄 Refresh page if microphone gets stuck
-        """)
-    
-    # Test microphone button
-    if st.button("🎙️ Test Microphone Access Now"):
-        test_js = '''
-        <script>
-        console.log('Testing microphone access...');
-        navigator.mediaDevices.getUserMedia({ audio: true })
-            .then(function(stream) {
-                stream.getTracks().forEach(track => track.stop());
-                alert('✅ SUCCESS: Microphone access works!');
-                console.log('Microphone test successful');
-            })
-            .catch(function(error) {
-                alert('❌ FAILED: ' + error.message);
-                console.error('Microphone test failed:', error);
-            });
-        </script>
-        '''
-        components.html(test_js, height=0)
-    
-    # Show current environment info
-    st.markdown("---")
-    st.markdown("### 📊 Environment Info")
-    env_info_js = '''
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const envInfo = {
-            userAgent: navigator.userAgent,
-            protocol: window.location.protocol,
-            hostname: window.location.hostname,
-            speechRecognition: 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window,
-            mediaDevices: 'mediaDevices' in navigator,
-            getUserMedia: 'getUserMedia' in (navigator.mediaDevices || {})
-        };
-        
-        console.log('Environment Info:', envInfo);
-        
-        let infoHtml = '<div style="background: #f0f0f0; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 12px;">';
-        infoHtml += '<strong>Browser Environment:</strong><br>';
-        infoHtml += 'User Agent: ' + envInfo.userAgent + '<br>';
-        infoHtml += 'Protocol: ' + envInfo.protocol + '<br>';
-        infoHtml += 'Hostname: ' + envInfo.hostname + '<br>';
-        infoHtml += 'Speech Recognition: ' + (envInfo.speechRecognition ? '✅ Available' : '❌ Not Available') + '<br>';
-        infoHtml += 'Media Devices: ' + (envInfo.mediaDevices ? '✅ Available' : '❌ Not Available') + '<br>';
-        infoHtml += 'getUserMedia: ' + (envInfo.getUserMedia ? '✅ Available' : '❌ Not Available');
-        infoHtml += '</div>';
-        
-        // Try to find a container to display this info
-        const containers = document.querySelectorAll('div');
-        if (containers.length > 0) {
-            const lastContainer = containers[containers.length - 1];
-            lastContainer.innerHTML = infoHtml;
-        }
-    });
-    </script>
-    '''
-    components.html(env_info_js, height=100)
+    # Environment check
+    st.markdown("**Expected Browser Requirements:**")
+    st.markdown("- ✅ Chrome (best support)")
+    st.markdown("- ✅ Edge (good support)")  
+    st.markdown("- ✅ Safari (basic support)")
+    st.markdown("- ❌ Firefox (not supported)")
+    st.markdown("- ✅ HTTPS or localhost required")
     
     # Conversation history
     if st.session_state.conversation_history:
         st.markdown("---")
         st.subheader("💬 Recent Conversations")
         
-        # Show last 3 conversations
         for i, conv in enumerate(reversed(st.session_state.conversation_history[-3:])):
             with st.expander(f"Conversation {len(st.session_state.conversation_history) - i} - {conv['timestamp']}"):
                 st.write(f"**You:** {conv['user']}")
@@ -674,9 +407,8 @@ def main():
     
     # Clear history button
     if st.session_state.conversation_history:
-        if st.button("🗑️ Clear Conversation History"):
+        if st.button("🗑️ Clear History"):
             st.session_state.conversation_history = []
-            st.session_state.processed_queries = set()
             st.rerun()
 
 if __name__ == "__main__":
