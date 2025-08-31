@@ -438,10 +438,13 @@ def main():
         browser_check = """
         <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 10px 0;">
             <script>
-            document.write('<p><strong>Protocol:</strong> ' + location.protocol + '</p>');
+            document.write('<p><strong>Protocol:</strong> ' + window.location.protocol + '</p>');
+            document.write('<p><strong>Host:</strong> ' + window.location.host + '</p>');
+            document.write('<p><strong>Full URL:</strong> ' + window.location.href + '</p>');
             document.write('<p><strong>Browser:</strong> ' + navigator.userAgent.split(')')[0] + ')</p>');
             document.write('<p><strong>Speech Recognition:</strong> ' + ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) + '</p>');
             document.write('<p><strong>Text-to-Speech:</strong> ' + ('speechSynthesis' in window) + '</p>');
+            document.write('<p><strong>Secure Context:</strong> ' + window.isSecureContext + '</p>');
             </script>
         </div>
         """
