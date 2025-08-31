@@ -67,10 +67,8 @@ def main():
     # Initialize session state
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
-    if 'voice_input' not in st.session_state:
-        st.session_state.voice_input = ""
-    if 'last_processed' not in st.session_state:
-        st.session_state.last_processed = ""
+    if 'processing_voice' not in st.session_state:
+        st.session_state.processing_voice = False
 
     # Custom CSS
     st.markdown("""
@@ -97,220 +95,20 @@ def main():
     st.markdown("# 🤖 Bob - Voice Assistant")
     st.markdown("### Talk to Bob or type your questions")
 
-    # Step 1: Quick API Test
-    st.markdown("---")
-    st.markdown("**🧪 Step 1: Test Bob's Brain**")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("What's 2+2?", key="test1"):
-            response = get_ai_response("What is 2 plus 2?")
-            st.success(f"Bob: {response}")
-    
-    with col2:
-        if st.button("Tell a joke", key="test2"):
-            response = get_ai_response("Tell me a short joke")
-            st.success(f"Bob: {response}")
-    
-    with col3:
-        if st.button("Say hello", key="test3"):
-            response = get_ai_response("Just say hello")
-            st.success(f"Bob: {response}")
-
-    # Step 2: Voice Interface with Session State
-    st.markdown("---")
-    st.markdown("**🎙️ Step 2: Voice Interface**")
-
-    # Display any pending voice input that needs processing
-    if st.session_state.voice_input and st.session_state.voice_input != st.session_state.last_processed:
-        st.markdown(f'<div class="voice-input">🎙️ <strong>You said:</strong> "{st.session_state.voice_input}"</div>', unsafe_allow_html=True)
-        
-        # Process the voice input
-        with st.spinner("🤖 Bob is thinking..."):
-            try:
-                ai_response = get_ai_response(st.session_state.voice_input)
-                
-                # Display response
-                st.markdown(f'<div class="voice-response">🤖 <strong>Bob says:</strong><br><br>{ai_response}</div>', unsafe_allow_html=True)
-                
-                # Add to conversation history
-                st.session_state.conversation_history.append({
-                    "user": st.session_state.voice_input,
-                    "bob": ai_response,
-                    "timestamp": time.strftime("%H:%M:%S"),
-                    "type": "voice"
-                })
-                
-                # Mark as processed
-                st.session_state.last_processed = st.session_state.voice_input
-                
-                # Text-to-Speech
-                import streamlit.components.v1 as components
-                clean_text = ai_response.replace('"', "'").replace('\n', ' ').replace('`', '').replace('*', '')
-                
-                tts_html = f"""
-                <div style="text-align: center; margin: 15px 0;">
-                    <button onclick="playResponse()" style="padding: 12px 24px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                        🔊 Play Bob's Voice
-                    </button>
-                    <div id="playStatus" style="margin-top: 8px; font-size: 14px;"></div>
-                </div>
-                
-                <script>
-                function playResponse() {{
-                    const text = `{clean_text}`;
-                    if ('speechSynthesis' in window) {{
-                        speechSynthesis.cancel();
-                        const utterance = new SpeechSynthesisUtterance(text);
-                        utterance.rate = 0.85;
-                        utterance.pitch = 1.0;
-                        
-                        utterance.onstart = () => document.getElementById('playStatus').innerHTML = '🔊 Playing...';
-                        utterance.onend = () => {{
-                            document.getElementById('playStatus').innerHTML = '✅ Finished';
-                            setTimeout(() => document.getElementById('playStatus').innerHTML = '', 2000);
-                        }};
-                        
-                        speechSynthesis.speak(utterance);
-                    }}
-                }}
-                
-                // Auto-play after a short delay
-                setTimeout(playResponse, 800);
-                </script>
-                """
-                
-                components.html(tts_html, height=70)
-                
-            except Exception as e:
-                st.error(f"❌ Error getting Bob's response: {e}")
-
-    # Voice input interface - COMPLETELY NEW APPROACH
-    import streamlit.components.v1 as components
-    
-    voice_component = f"""
-    <div style="text-align: center; padding: 30px; background: linear-gradient(135deg, #74b9ff, #0984e3); border-radius: 15px; margin: 20px 0;">
-        <div style="color: white; font-size: 18px; margin-bottom: 20px;">
-            🎙️ Click and speak to Bob
-        </div>
-        
-        <button id="micBtn" style="
-            font-size: 70px; 
-            background: rgba(255,255,255,0.2); 
-            border: 3px solid white; 
-            border-radius: 50%; 
-            cursor: pointer; 
-            padding: 20px;
-            transition: all 0.3s;
-            color: white;
-        ">🎤</button>
-        
-        <div id="micStatus" style="color: white; margin-top: 15px; font-size: 16px; min-height: 25px;">
-            Ready to listen
-        </div>
-        
-        <div id="transcript" style="
-            background: rgba(255,255,255,0.9); 
-            color: #333; 
-            padding: 15px; 
-            border-radius: 10px; 
-            margin-top: 15px; 
-            display: none;
-            font-style: italic;
-        "></div>
-    </div>
-
-    <script>
-    let recognition;
-    let listening = false;
-
-    document.getElementById('micBtn').addEventListener('click', function() {{
-        const btn = this;
-        const status = document.getElementById('micStatus');
-        const transcript = document.getElementById('transcript');
-        
-        if (listening) return;
-        
-        // Check browser support
-        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {{
-            status.innerHTML = '❌ Speech not supported. Use Chrome!';
-            return;
-        }}
-
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        recognition = new SpeechRecognition();
-        
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = 'en-US';
-
-        recognition.onstart = function() {{
-            listening = true;
-            btn.style.background = 'rgba(255,0,0,0.3)';
-            btn.style.transform = 'scale(1.1)';
-            status.innerHTML = '🎤 Listening... Speak now!';
-            transcript.style.display = 'none';
-        }};
-
-        recognition.onresult = function(event) {{
-            const spokenText = event.results[0][0].transcript.trim();
-            
-            transcript.innerHTML = `You said: "${{spokenText}}"`;
-            transcript.style.display = 'block';
-            status.innerHTML = '✅ Got it! Sending to Bob...';
-            
-            // Send to Streamlit using query params
-            setTimeout(() => {{
-                const url = new URL(window.location);
-                url.searchParams.set('voice_query', spokenText);
-                url.searchParams.set('ts', Date.now());
-                window.location.href = url.toString();
-            }}, 1500);
-        }};
-
-        recognition.onerror = function(event) {{
-            status.innerHTML = `❌ Error: ${{event.error}}`;
-            btn.style.background = 'rgba(255,255,255,0.2)';
-            btn.style.transform = 'scale(1)';
-            listening = false;
-            
-            // Show helpful error messages
-            setTimeout(() => {{
-                if (event.error === 'not-allowed') {{
-                    status.innerHTML = '🔒 Please allow microphone access';
-                }} else if (event.error === 'no-speech') {{
-                    status.innerHTML = '🔇 No speech detected. Try again!';
-                }} else {{
-                    status.innerHTML = '⚠️ Try again or use text input';
-                }}
-            }}, 2000);
-        }};
-
-        recognition.onend = function() {{
-            btn.style.background = 'rgba(255,255,255,0.2)';
-            btn.style.transform = 'scale(1)';
-            listening = false;
-            
-            if (status.innerHTML.includes('Listening')) {{
-                status.innerHTML = '🔇 No speech heard. Try again!';
-            }}
-        }};
-
-        try {{
-            recognition.start();
-        }} catch (error) {{
-            status.innerHTML = '❌ Cannot start: ' + error.message;
-        }}
-    }});
-    </script>
-    """
-    
-    components.html(voice_component, height=250)
-
-    # Process voice query from URL parameters - FIXED
+    # FIXED: Process voice query from URL parameters FIRST
     voice_query = st.query_params.get("voice_query")
-    if voice_query:
-        # Clear the URL parameter immediately to prevent reprocessing
+    timestamp = st.query_params.get("ts")
+    
+    # Create a unique key for this voice input to prevent reprocessing
+    voice_key = f"{voice_query}_{timestamp}" if voice_query and timestamp else None
+    
+    if voice_query and voice_key and voice_key not in st.session_state.get('processed_queries', set()):
+        # Mark as processing to prevent duplicates
+        if 'processed_queries' not in st.session_state:
+            st.session_state.processed_queries = set()
+        st.session_state.processed_queries.add(voice_key)
+        
+        # Clear URL parameters immediately
         st.query_params.clear()
         
         st.markdown(f'<div class="voice-input">🎙️ <strong>Voice Input:</strong> "{voice_query}"</div>', unsafe_allow_html=True)
@@ -331,46 +129,260 @@ def main():
                     "type": "voice"
                 })
                 
-                # Auto-play response
-                clean_response = ai_response.replace('"', "'").replace('\n', ' ').replace('`', '').replace('*', '')[:200]  # Limit length
+                # Auto-play TTS
+                import streamlit.components.v1 as components
+                clean_text = ai_response.replace('"', "'").replace('\n', ' ').replace('`', '').replace('*', '')[:300]
                 
                 tts_html = f"""
                 <div style="text-align: center; margin: 20px 0;">
-                    <button onclick="speak()" style="padding: 15px 30px; background: #28a745; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 18px;">
-                        🔊 Hear Bob's Response
+                    <button onclick="playResponse()" style="padding: 15px 30px; background: #28a745; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 18px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                        🔊 Play Bob's Response
                     </button>
-                    <div id="ttsStatus" style="margin-top: 10px; font-size: 14px;"></div>
+                    <div id="playStatus" style="margin-top: 10px; font-size: 14px;"></div>
                 </div>
                 
                 <script>
-                function speak() {{
-                    const text = `{clean_response}`;
+                function playResponse() {{
+                    const text = `{clean_text}`;
                     if ('speechSynthesis' in window) {{
                         speechSynthesis.cancel();
                         const utterance = new SpeechSynthesisUtterance(text);
-                        utterance.rate = 0.9;
-                        utterance.onstart = () => document.getElementById('ttsStatus').innerHTML = '🔊 Speaking...';
-                        utterance.onend = () => document.getElementById('ttsStatus').innerHTML = '✅ Done';
+                        utterance.rate = 0.85;
+                        utterance.pitch = 1.0;
+                        
+                        utterance.onstart = () => document.getElementById('playStatus').innerHTML = '🔊 Playing...';
+                        utterance.onend = () => {{
+                            document.getElementById('playStatus').innerHTML = '✅ Finished';
+                            setTimeout(() => document.getElementById('playStatus').innerHTML = '', 2000);
+                        }};
+                        
                         speechSynthesis.speak(utterance);
+                    }} else {{
+                        document.getElementById('playStatus').innerHTML = '❌ TTS not supported';
                     }}
                 }}
                 
-                // Auto-play
-                setTimeout(speak, 1000);
+                // Auto-play after delay
+                setTimeout(playResponse, 1000);
                 </script>
                 """
                 
-                components.html(tts_html, height=80)
+                components.html(tts_html, height=100)
                 
             except Exception as e:
                 st.error(f"❌ Error processing voice input: {e}")
-                st.write(f"Debug - Voice query was: {voice_query}")
+
+    # Step 1: Quick API Test
+    st.markdown("---")
+    st.markdown("**🧪 Step 1: Test Bob's Brain**")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("What's 2+2?", key="test1"):
+            response = get_ai_response("What is 2 plus 2?")
+            st.success(f"Bob: {response}")
+    
+    with col2:
+        if st.button("Tell a joke", key="test2"):
+            response = get_ai_response("Tell me a short joke")
+            st.success(f"Bob: {response}")
+    
+    with col3:
+        if st.button("Say hello", key="test3"):
+            response = get_ai_response("Just say hello")
+            st.success(f"Bob: {response}")
+
+    # Step 2: FIXED Voice Interface
+    st.markdown("---")
+    st.markdown("**🎙️ Step 2: Voice Interface**")
+
+    import streamlit.components.v1 as components
+    
+    # FIXED: Better voice component with proper error handling
+    voice_component = f"""
+    <div style="text-align: center; padding: 30px; background: linear-gradient(135deg, #74b9ff, #0984e3); border-radius: 15px; margin: 20px 0;">
+        <div style="color: white; font-size: 18px; margin-bottom: 20px;">
+            🎙️ Click the microphone and speak clearly
+        </div>
+        
+        <button id="micBtn" style="
+            font-size: 70px; 
+            background: rgba(255,255,255,0.2); 
+            border: 3px solid white; 
+            border-radius: 50%; 
+            cursor: pointer; 
+            padding: 20px;
+            transition: all 0.3s;
+            color: white;
+            outline: none;
+        ">🎤</button>
+        
+        <div id="micStatus" style="color: white; margin-top: 15px; font-size: 16px; min-height: 25px;">
+            Click microphone to start
+        </div>
+        
+        <div id="transcript" style="
+            background: rgba(255,255,255,0.9); 
+            color: #333; 
+            padding: 15px; 
+            border-radius: 10px; 
+            margin-top: 15px; 
+            display: none;
+            font-style: italic;
+        "></div>
+    </div>
+
+    <script>
+    let recognition;
+    let listening = false;
+    let processed = new Set();
+
+    document.getElementById('micBtn').addEventListener('click', function() {{
+        const btn = this;
+        const status = document.getElementById('micStatus');
+        const transcript = document.getElementById('transcript');
+        
+        if (listening) {{
+            status.innerHTML = '⏸️ Already listening...';
+            return;
+        }}
+        
+        // Check browser support
+        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {{
+            status.innerHTML = '❌ Speech recognition not supported. Please use Chrome or Edge.';
+            return;
+        }}
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        
+        // Configure recognition
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = function() {{
+            listening = true;
+            btn.style.background = 'rgba(255,0,0,0.4)';
+            btn.style.transform = 'scale(1.15)';
+            btn.style.boxShadow = '0 0 20px rgba(255,0,0,0.5)';
+            status.innerHTML = '🎤 LISTENING... Speak now!';
+            transcript.style.display = 'none';
+        }};
+
+        recognition.onresult = function(event) {{
+            const spokenText = event.results[0][0].transcript.trim();
+            const confidence = event.results[0][0].confidence;
+            
+            console.log('Speech result:', spokenText, 'Confidence:', confidence);
+            
+            if (spokenText.length > 0) {{
+                transcript.innerHTML = `You said: "${{spokenText}}" (confidence: ${{(confidence * 100).toFixed(0)}}%)`;
+                transcript.style.display = 'block';
+                status.innerHTML = '✅ Got it! Sending to Bob...';
+                
+                // Generate unique timestamp
+                const timestamp = Date.now();
+                const queryKey = `${{spokenText}}_${{timestamp}}`;
+                
+                // Avoid duplicate processing
+                if (!processed.has(queryKey)) {{
+                    processed.add(queryKey);
+                    
+                    // Send to Streamlit with unique timestamp
+                    setTimeout(() => {{
+                        const url = new URL(window.location);
+                        url.searchParams.set('voice_query', spokenText);
+                        url.searchParams.set('ts', timestamp);
+                        window.location.href = url.toString();
+                    }}, 1000);
+                }} else {{
+                    status.innerHTML = '⚠️ Already processing this input...';
+                }}
+            }} else {{
+                status.innerHTML = '🔇 No text detected. Try again!';
+            }}
+        }};
+
+        recognition.onerror = function(event) {{
+            console.error('Speech recognition error:', event.error);
+            
+            btn.style.background = 'rgba(255,255,255,0.2)';
+            btn.style.transform = 'scale(1)';
+            btn.style.boxShadow = 'none';
+            listening = false;
+            
+            let errorMsg = '❌ ';
+            switch(event.error) {{
+                case 'not-allowed':
+                    errorMsg += 'Microphone access denied. Please allow microphone access and try again.';
+                    break;
+                case 'no-speech':
+                    errorMsg += 'No speech detected. Click again and speak clearly.';
+                    break;
+                case 'audio-capture':
+                    errorMsg += 'No microphone found. Check your microphone connection.';
+                    break;
+                case 'network':
+                    errorMsg += 'Network error. Check your internet connection.';
+                    break;
+                case 'aborted':
+                    errorMsg += 'Speech recognition aborted.';
+                    break;
+                default:
+                    errorMsg += `Error (${{event.error}}). Try again or use text input.`;
+            }}
+            
+            status.innerHTML = errorMsg;
+            
+            // Reset status after delay
+            setTimeout(() => {{
+                status.innerHTML = 'Click microphone to try again';
+            }}, 4000);
+        }};
+
+        recognition.onend = function() {{
+            btn.style.background = 'rgba(255,255,255,0.2)';
+            btn.style.transform = 'scale(1)';
+            btn.style.boxShadow = 'none';
+            listening = false;
+            
+            // Only show "no speech" if we didn't get a result
+            if (status.innerHTML.includes('LISTENING')) {{
+                status.innerHTML = '🔇 No speech detected. Try again!';
+                setTimeout(() => {{
+                    status.innerHTML = 'Click microphone to try again';
+                }}, 3000);
+            }}
+        }};
+
+        try {{
+            recognition.start();
+        }} catch (error) {{
+            console.error('Failed to start recognition:', error);
+            status.innerHTML = '❌ Cannot start speech recognition: ' + error.message;
+            listening = false;
+        }}
+    }});
+
+    // Add keyboard shortcut (spacebar to start recording)
+    document.addEventListener('keydown', function(event) {{
+        if (event.code === 'Space' && !listening && event.target.tagName !== 'INPUT') {{
+            event.preventDefault();
+            document.getElementById('micBtn').click();
+        }}
+    }});
+    </script>
+    """
+    
+    components.html(voice_component, height=280)
 
     # Manual text input
     st.markdown("---")
     st.markdown("### 💬 Text Input (Always Works)")
     
-    text_input = st.text_input("Type your question to Bob:", placeholder="Ask anything...")
+    text_input = st.text_input("Type your question to Bob:", placeholder="Ask anything...", key="text_input")
     
     if st.button("Ask Bob", type="primary") and text_input:
         with st.spinner("🤖 Bob is thinking..."):
@@ -381,97 +393,162 @@ def main():
                 "timestamp": time.strftime("%H:%M:%S"),
                 "type": "text"
             })
-            st.success(f"**Bob:** {ai_response}")
+            
+            # Show response with TTS option
+            st.markdown(f'<div class="voice-response">🤖 <strong>Bob:</strong><br><br>{ai_response}</div>', unsafe_allow_html=True)
+            
+            # Add TTS for text responses too
+            clean_text = ai_response.replace('"', "'").replace('\n', ' ').replace('`', '').replace('*', '')[:300]
+            
+            tts_html = f"""
+            <div style="text-align: center; margin: 15px 0;">
+                <button onclick="speakText()" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                    🔊 Hear Bob's Response
+                </button>
+                <div id="ttsTextStatus" style="margin-top: 8px; font-size: 12px;"></div>
+            </div>
+            
+            <script>
+            function speakText() {{
+                const text = `{clean_text}`;
+                if ('speechSynthesis' in window) {{
+                    speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 0.9;
+                    utterance.onstart = () => document.getElementById('ttsTextStatus').innerHTML = '🔊 Speaking...';
+                    utterance.onend = () => document.getElementById('ttsTextStatus').innerHTML = '✅ Done';
+                    speechSynthesis.speak(utterance);
+                }}
+            }}
+            </script>
+            """
+            
+            components.html(tts_html, height=60)
 
     # Emergency test section
     st.markdown("---")
     st.markdown("### 🚨 Emergency Test Section")
-    st.markdown("If voice isn't working, test these one by one:")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("🧠 Test Bob's Brain", help="Test if AI agent works"):
+        if st.button("🧠 Test Bob's Brain", key="test_brain"):
             try:
-                response = get_ai_response("Say the word 'hello' and nothing else")
-                st.write(f"✅ **Response:** {response}")
+                response = get_ai_response("Say 'Hello, I am working perfectly!' and nothing else")
+                st.success(f"✅ **Bob:** {response}")
             except Exception as e:
                 st.error(f"❌ **AI Error:** {e}")
     
     with col2:
-        if st.button("🎯 Test Simple Query", help="Test a basic question"):
-            response = get_ai_response("What is 1 plus 1?")
-            st.write(f"✅ **Bob:** {response}")
+        if st.button("🎯 Test Simple Query", key="test_simple"):
+            response = get_ai_response("What is 5 times 5?")
+            st.success(f"✅ **Bob:** {response}")
 
-    # Show what's happening behind the scenes
+    # Debug information
     st.markdown("---")
-    st.markdown("### 🔍 What's Happening")
+    st.markdown("### 🔍 Debug Information")
     
-    # Real-time status
-    status_container = st.container()
-    with status_container:
-        st.write("**Current Status:**")
-        
-        # Check for voice input in URL
-        current_voice = st.query_params.get("voice_query")
-        if current_voice:
-            st.info(f"🎙️ Found voice input: '{current_voice}'")
+    with st.expander("Current Status & Debug Info"):
+        st.write("**URL Parameters:**")
+        if st.query_params:
+            for key, value in st.query_params.items():
+                st.write(f"- {key}: {value}")
         else:
-            st.info("🔍 Waiting for voice input...")
+            st.write("- No URL parameters")
         
-        # Show session state
-        st.write("**Session Info:**")
-        st.write(f"- Last voice input: {st.session_state.voice_input or 'None'}")
-        st.write(f"- Last processed: {st.session_state.last_processed or 'None'}")
+        st.write("**Session State:**")
+        st.write(f"- Processed queries: {len(st.session_state.get('processed_queries', set()))}")
         st.write(f"- Total conversations: {len(st.session_state.conversation_history)}")
+        
+        st.write("**Browser Info:**")
+        check_browser = """
+        <script>
+        document.write('<p>User Agent: ' + navigator.userAgent + '</p>');
+        document.write('<p>HTTPS: ' + (location.protocol === 'https:') + '</p>');
+        document.write('<p>Speech Recognition: ' + ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) + '</p>');
+        </script>
+        """
+        components.html(check_browser, height=100)
 
     # Conversation history
     if st.session_state.conversation_history:
         st.markdown("---")
         st.markdown("### 💬 Recent Conversations")
         
-        for i, conv in enumerate(reversed(st.session_state.conversation_history[-3:])):
+        for i, conv in enumerate(reversed(st.session_state.conversation_history[-5:])):
             icon = "🎙️" if conv.get('type') == 'voice' else "⌨️"
-            with st.expander(f"{icon} {conv['timestamp']} - {conv['user'][:30]}..."):
+            with st.expander(f"{icon} {conv['timestamp']} - {conv['user'][:40]}..."):
                 st.write(f"**You:** {conv['user']}")
                 st.write(f"**Bob:** {conv['bob']}")
         
-        if st.button("🗑️ Clear All History"):
+        if st.button("🗑️ Clear All History", key="clear_history"):
             st.session_state.conversation_history = []
-            st.session_state.voice_input = ""
-            st.session_state.last_processed = ""
+            if 'processed_queries' in st.session_state:
+                st.session_state.processed_queries.clear()
             st.rerun()
 
-    # Troubleshooting guide
+    # Enhanced troubleshooting guide
     st.markdown("---")
     st.markdown("### 🛠️ Troubleshooting")
     
-    with st.expander("Voice not working? Try these steps:"):
+    with st.expander("Voice not working? Try these solutions:"):
         st.markdown("""
-        **1. Browser Check:**
-        - ✅ Use Chrome (best support)
-        - ✅ Use Edge (good support)
-        - ⚠️ Safari (limited support)
-        - ❌ Firefox (not supported)
+        **🔧 Common Issues & Fixes:**
         
-        **2. Permissions:**
-        - Allow microphone access when prompted
-        - Check browser settings for microphone permissions
+        **1. Browser Compatibility:**
+        - ✅ **Chrome** (Recommended - best support)
+        - ✅ **Edge** (Good support) 
+        - ⚠️ **Safari** (Limited support, may not work)
+        - ❌ **Firefox** (No support for Web Speech API)
         
-        **3. Environment:**
-        - Must be HTTPS or localhost
-        - Good internet connection required
+        **2. Streamlit Cloud Specific Issues:**
+        - Voice input requires **HTTPS** (Streamlit Cloud provides this)
+        - Check that your deployed app URL starts with `https://`
+        - Clear browser cache if voice was working before
         
-        **4. Speaking Tips:**
-        - Speak clearly and loudly
-        - Wait for the red microphone before speaking
-        - Keep sentences short and clear
+        **3. Microphone Permissions:**
+        - Browser will ask for microphone permission - click "Allow"
+        - If denied, click the lock/microphone icon in address bar
+        - In Chrome: Settings > Privacy > Site Settings > Microphone
         
-        **5. If still not working:**
-        - Refresh the page
-        - Try incognito/private window
-        - Use text input as backup
+        **4. Environment Requirements:**
+        - Must be HTTPS (✅ Streamlit Cloud)
+        - Stable internet connection required
+        - No ad blockers blocking microphone access
+        
+        **5. Speaking Guidelines:**
+        - Wait for "LISTENING..." message before speaking
+        - Speak clearly and at normal volume
+        - Keep sentences under 10 seconds
+        - Avoid background noise
+        
+        **6. If Voice Still Fails:**
+        - Try refreshing the page
+        - Test in incognito/private window
+        - Check browser console for errors (F12)
+        - Use text input as reliable backup
+        - Try a different browser
         """)
+
+    # Manual voice test
+    st.markdown("---")
+    st.markdown("### 🎯 Manual Voice Test")
+    
+    manual_voice = st.text_input("Simulate voice input (for testing):", placeholder="Type what you would say...")
+    if st.button("Process as Voice Input", key="manual_voice") and manual_voice:
+        # Simulate voice processing
+        st.markdown(f'<div class="voice-input">🎙️ <strong>Simulated Voice:</strong> "{manual_voice}"</div>', unsafe_allow_html=True)
+        
+        with st.spinner("🤖 Bob is responding..."):
+            ai_response = get_ai_response(manual_voice)
+            st.markdown(f'<div class="voice-response">🤖 <strong>Bob:</strong><br><br>{ai_response}</div>', unsafe_allow_html=True)
+            
+            st.session_state.conversation_history.append({
+                "user": manual_voice,
+                "bob": ai_response,
+                "timestamp": time.strftime("%H:%M:%S"),
+                "type": "manual_voice"
+            })
 
 if __name__ == "__main__":
     main()
