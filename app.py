@@ -196,6 +196,9 @@ def main():
     st.markdown("---")
     st.markdown("**🎙️ Step 2: Voice Interface**")
     
+    # Import components first
+    import streamlit.components.v1 as components
+    
     # Check HTTPS status and show warning if needed
     https_check = """
     <script>
@@ -210,8 +213,6 @@ def main():
 
     # Display voice conversation area FIRST
     voice_container = st.container()
-    
-    import streamlit.components.v1 as components
     
     # FIXED: Better voice component with proper error handling
     voice_component = f"""
