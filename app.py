@@ -69,14 +69,18 @@ def main():
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
 
-    # HANDLE VOICE INPUT FROM URL PARAMETERS - UNIFIED PARAMETER NAME
+    # HANDLE VOICE INPUT FROM URL PARAMETERS
     voice_input = st.query_params.get("voice_input")
-    voice_ts = st.query_params.get("voice_ts")
     
-    if voice_input and voice_ts:
-        # Clear parameters immediately
+    if voice_input:
+        # Clear parameters immediately to prevent reprocessing
         st.query_params.clear()
         
+        # Force a rerun to clear the URL
+        st.rerun()
+        
+    # Check if we have voice input to process
+    if voice_input and voice_input.strip():
         # BIG VOICE CONVERSATION DISPLAY
         st.markdown("## 🗣️ VOICE CONVERSATION RESULT")
         
@@ -88,9 +92,18 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        # Get AI response
-        with st.spinner("🤖 Bob is generating response..."):
-            bot_response = get_ai_response(voice_input)
+        # Get AI response with error handling
+        try:
+            with st.spinner("🤖 Bob is generating response..."):
+                bot_response = get_ai_response(voice_input)
+                
+            # Debug: Show what we got back
+            st.write(f"Debug - Response type: {type(bot_response)}")
+            st.write(f"Debug - Response length: {len(str(bot_response))}")
+            
+        except Exception as e:
+            bot_response = f"Sorry, I had trouble processing your request: {str(e)}"
+            st.error(f"Error in voice processing: {e}")
         
         # Bot response display
         st.markdown(f"""
@@ -99,68 +112,6 @@ def main():
             <h3 style="margin: 0; line-height: 1.4;">{bot_response}</h3>
         </div>
         """, unsafe_allow_html=True)
-        
-        # TTS Playback
-        clean_speech = bot_response.replace('"', "'").replace('\n', ' ').replace('`', '').replace('*', '')
-        
-        tts_html = f"""
-        <div style="text-align: center; margin: 30px 0;">
-            <button onclick="playBobResponse()" style="
-                padding: 20px 50px; 
-                background: #9C27B0; 
-                color: white; 
-                border: none; 
-                border-radius: 15px; 
-                cursor: pointer; 
-                font-size: 22px; 
-                font-weight: bold;
-                box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-                transition: all 0.3s;
-            " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                🔊 HEAR BOB'S VOICE
-            </button>
-            <div id="ttsStatus" style="margin-top: 15px; font-size: 18px; font-weight: bold;"></div>
-        </div>
-        
-        <script>
-        function playBobResponse() {{
-            const text = `{clean_speech}`;
-            const status = document.getElementById('ttsStatus');
-            
-            if ('speechSynthesis' in window) {{
-                speechSynthesis.cancel();
-                
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.rate = 0.85;
-                utterance.pitch = 1.0;
-                utterance.volume = 1.0;
-                
-                utterance.onstart = () => {{
-                    status.innerHTML = '🔊 Bob is speaking...';
-                    status.style.color = '#9C27B0';
-                }};
-                
-                utterance.onend = () => {{
-                    status.innerHTML = '✅ Bob finished speaking!';
-                    status.style.color = '#4CAF50';
-                    setTimeout(() => status.innerHTML = '', 3000);
-                }};
-                
-                speechSynthesis.speak(utterance);
-            }} else {{
-                status.innerHTML = '❌ Text-to-speech not available';
-                status.style.color = '#f44336';
-            }}
-        }}
-        
-        // Auto-play after 1.5 seconds
-        setTimeout(() => {{
-            playBobResponse();
-        }}, 1500);
-        </script>
-        """
-        
-        components.html(tts_html, height=120)
         
         # Add to session history
         st.session_state.conversation_history.append({
