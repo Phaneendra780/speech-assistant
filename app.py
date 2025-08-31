@@ -4,6 +4,7 @@ from phi.model.google import Gemini
 from phi.tools.tavily import TavilyTools
 import time
 import streamlit.components.v1 as components
+import json
 
 # Set page configuration
 st.set_page_config(
@@ -34,6 +35,7 @@ You are Bob, a helpful voice assistant. You can answer questions about any topic
 
 Provide clear, concise, and helpful responses that are suitable for voice output.
 Keep your responses conversational and easy to understand when spoken aloud.
+Limit responses to 2-3 sentences for better voice experience.
 """
 
 @st.cache_resource
@@ -94,6 +96,11 @@ def create_voice_interface():
                 color: #357ABD;
                 box-shadow: 0 6px 20px rgba(74, 144, 226, 0.4);
             }
+            .microphone:disabled {
+                color: #ccc;
+                cursor: not-allowed;
+                transform: none;
+            }
             .microphone.listening {
                 color: #E74C3C;
                 animation: pulse 1.5s infinite;
@@ -141,31 +148,33 @@ def create_voice_interface():
                 color: #856404;
                 border: 1px solid #ffeaa7;
             }
-            .permission-status {
+            .debug-info {
                 margin-top: 15px;
                 padding: 10px;
+                background: #f1f1f1;
                 border-radius: 5px;
-                text-align: center;
-                font-size: 14px;
+                font-size: 12px;
+                color: #666;
+                max-width: 500px;
             }
-            .permission-granted {
-                background: #d1ecf1;
-                color: #0c5460;
-                border: 1px solid #bee5eb;
-            }
-            .permission-denied {
+            .error-info {
                 background: #f8d7da;
                 color: #721c24;
                 border: 1px solid #f5c6cb;
+            }
+            .success-info {
+                background: #d1ecf1;
+                color: #0c5460;
+                border: 1px solid #bee5eb;
             }
         </style>
     </head>
     <body>
         <div class="voice-container">
             <button class="microphone" id="micButton">🎤</button>
-            <div class="status" id="status">Click the microphone to start</div>
-            <div class="wake-word-status wake-waiting" id="wakeStatus">Waiting for "Hey Bob"...</div>
-            <div class="permission-status" id="permissionStatus" style="display: none;"></div>
+            <div class="status" id="status">Checking browser compatibility...</div>
+            <div class="wake-word-status wake-waiting" id="wakeStatus">Initializing...</div>
+            <div class="debug-info" id="debugInfo">Loading...</div>
             <div class="transcript" id="transcript" style="display: none;"></div>
         </div>
 
@@ -179,134 +188,183 @@ def create_voice_interface():
             const status = document.getElementById('status');
             const transcript = document.getElementById('transcript');
             const wakeStatus = document.getElementById('wakeStatus');
-            const permissionStatus = document.getElementById('permissionStatus');
+            const debugInfo = document.getElementById('debugInfo');
+
+            function updateDebugInfo(message, isError = false) {
+                console.log('Debug:', message);
+                debugInfo.textContent = message;
+                debugInfo.className = isError ? 'debug-info error-info' : 'debug-info success-info';
+            }
+
+            // Check browser compatibility
+            function checkBrowserSupport() {
+                const userAgent = navigator.userAgent;
+                let browserInfo = '';
+                
+                if (userAgent.includes('Chrome')) {
+                    browserInfo = 'Chrome detected';
+                } else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) {
+                    browserInfo = 'Safari detected';
+                } else if (userAgent.includes('Edge')) {
+                    browserInfo = 'Edge detected';
+                } else {
+                    browserInfo = 'Browser may not support speech recognition';
+                }
+                
+                const isHttps = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+                const protocolInfo = isHttps ? 'Secure connection' : 'Insecure connection (HTTPS required)';
+                
+                updateDebugInfo(`${browserInfo}, ${protocolInfo}`);
+                
+                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                    return true;
+                } else {
+                    updateDebugInfo('Speech Recognition API not available', true);
+                    status.textContent = 'Speech recognition not supported. Use Chrome, Edge, or Safari with HTTPS.';
+                    micButton.disabled = true;
+                    return false;
+                }
+            }
 
             // Function to check and request microphone permission
             async function requestMicrophonePermission() {
+                updateDebugInfo('Requesting microphone permission...');
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     // Permission granted
                     stream.getTracks().forEach(track => track.stop()); // Stop the stream
                     permissionGranted = true;
-                    permissionStatus.style.display = 'block';
-                    permissionStatus.className = 'permission-status permission-granted';
-                    permissionStatus.textContent = '✅ Microphone access granted';
+                    updateDebugInfo('Microphone permission granted');
                     return true;
                 } catch (error) {
                     // Permission denied
-                    permissionStatus.style.display = 'block';
-                    permissionStatus.className = 'permission-status permission-denied';
-                    permissionStatus.textContent = '❌ Microphone access denied. Please allow microphone access and refresh the page.';
-                    status.textContent = 'Microphone permission required';
+                    updateDebugInfo(`Microphone permission denied: ${error.message}`, true);
+                    status.textContent = 'Microphone access denied. Please allow access and refresh.';
                     return false;
                 }
             }
 
             // Initialize speech recognition
             function initializeSpeechRecognition() {
-                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    recognition = new SpeechRecognition();
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+
+                recognition.onstart = function() {
+                    isListening = true;
+                    micButton.classList.add('listening');
+                    updateDebugInfo('Speech recognition started');
                     
-                    recognition.continuous = false;
-                    recognition.interimResults = true;
-                    recognition.lang = 'en-US';
+                    if (!wakeWordDetected) {
+                        status.textContent = 'Listening for "Hey Bob"...';
+                        wakeStatus.textContent = 'Say "Hey Bob" now...';
+                    } else {
+                        status.textContent = 'I\'m listening... What can I help you with?';
+                    }
+                };
 
-                    recognition.onstart = function() {
-                        isListening = true;
-                        micButton.classList.add('listening');
-                        if (!wakeWordDetected) {
-                            status.textContent = 'Listening for "Hey Bob"...';
-                        } else {
-                            status.textContent = 'I\'m listening... What can I help you with?';
-                        }
-                    };
-
-                    recognition.onresult = function(event) {
-                        const text = event.results[0][0].transcript.toLowerCase();
-                        console.log('Heard:', text);
-                        
-                        if (!wakeWordDetected) {
-                            // Check for wake word
-                            if (text.includes('hey bob') || text.includes('hi bob')) {
-                                wakeWordDetected = true;
-                                wakeStatus.textContent = '✅ Wake word detected! Ask your question...';
-                                wakeStatus.className = 'wake-word-status wake-detected';
-                                status.textContent = 'Great! Now ask me anything...';
-                                
-                                // Speak confirmation
-                                const utterance = new SpeechSynthesisUtterance('Hello! What can I help you with?');
-                                utterance.rate = 0.8;
-                                speechSynthesis.speak(utterance);
-                                
-                                // Start listening for the actual query
-                                setTimeout(() => {
-                                    if (recognition && !isListening) {
-                                        recognition.start();
-                                    }
-                                }, 2500);
-                            } else {
-                                status.textContent = 'I heard: "' + event.results[0][0].transcript + '" - Please say "Hey Bob"';
-                                setTimeout(() => {
-                                    status.textContent = 'Click the microphone and say "Hey Bob"';
-                                }, 3000);
-                            }
-                        } else {
-                            // Process the actual query
-                            const query = event.results[0][0].transcript;
-                            transcript.style.display = 'block';
-                            transcript.innerHTML = '<strong>You said:</strong> ' + query;
+                recognition.onresult = function(event) {
+                    const result = event.results[0];
+                    const text = result[0].transcript.toLowerCase().trim();
+                    const confidence = result[0].confidence;
+                    
+                    updateDebugInfo(`Heard: "${text}" (confidence: ${confidence?.toFixed(2) || 'unknown'})`);
+                    
+                    if (!wakeWordDetected) {
+                        // Check for wake word
+                        if (text.includes('hey bob') || text.includes('hi bob') || text.includes('hello bob')) {
+                            wakeWordDetected = true;
+                            wakeStatus.textContent = '✅ Wake word detected! Ask your question...';
+                            wakeStatus.className = 'wake-word-status wake-detected';
+                            status.textContent = 'Great! Now ask me anything...';
                             
-                            // Send query to Streamlit parent window
-                            const message = {
-                                type: 'streamlit:setComponentValue',
-                                value: {
-                                    type: 'voice_query',
-                                    query: query,
-                                    timestamp: Date.now()
+                            updateDebugInfo('Wake word detected, preparing for query...');
+                            
+                            // Speak confirmation
+                            const utterance = new SpeechSynthesisUtterance('Hello! What can I help you with?');
+                            utterance.rate = 0.8;
+                            speechSynthesis.speak(utterance);
+                            
+                            // Start listening for the actual query after confirmation
+                            setTimeout(() => {
+                                if (recognition && !isListening) {
+                                    recognition.start();
                                 }
-                            };
-                            window.parent.postMessage(message, '*');
-                            
-                            status.textContent = 'Processing your question...';
-                            micButton.classList.remove('listening');
-                            micButton.classList.add('processing');
+                            }, 2500);
+                        } else {
+                            status.textContent = `I heard: "${result[0].transcript}" - Please say "Hey Bob"`;
+                            setTimeout(() => {
+                                status.textContent = 'Click the microphone and say "Hey Bob"';
+                            }, 3000);
                         }
-                    };
-
-                    recognition.onerror = function(event) {
-                        console.error('Speech recognition error:', event.error);
-                        let errorMessage = 'Please try again.';
+                    } else {
+                        // Process the actual query
+                        const query = result[0].transcript;
+                        transcript.style.display = 'block';
+                        transcript.innerHTML = '<strong>You said:</strong> ' + query;
                         
-                        if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-                            errorMessage = 'Microphone permission denied. Please allow access and refresh.';
-                            permissionStatus.style.display = 'block';
-                            permissionStatus.className = 'permission-status permission-denied';
-                            permissionStatus.textContent = '❌ Microphone access denied';
-                        }
+                        updateDebugInfo(`Processing query: "${query}"`);
                         
-                        status.textContent = 'Error: ' + event.error + '. ' + errorMessage;
-                        micButton.classList.remove('listening', 'processing');
-                        isListening = false;
-                    };
-
-                    recognition.onend = function() {
+                        // Use Streamlit's component communication
+                        window.parent.postMessage({
+                            type: 'streamlit:setComponentValue',
+                            value: query
+                        }, '*');
+                        
+                        status.textContent = 'Processing your question...';
                         micButton.classList.remove('listening');
-                        isListening = false;
-                        
-                        if (!wakeWordDetected) {
-                            status.textContent = 'Click the microphone and say "Hey Bob"';
-                        }
-                    };
+                        micButton.classList.add('processing');
+                    }
+                };
 
-                } else {
-                    status.textContent = 'Speech recognition not supported in this browser. Please use Chrome, Edge, or Safari.';
-                    micButton.disabled = true;
-                }
+                recognition.onerror = function(event) {
+                    console.error('Speech recognition error:', event.error);
+                    updateDebugInfo(`Speech error: ${event.error}`, true);
+                    
+                    let errorMessage = 'Please try again.';
+                    
+                    switch(event.error) {
+                        case 'not-allowed':
+                        case 'permission-denied':
+                            errorMessage = 'Microphone permission denied. Please allow access and refresh.';
+                            permissionGranted = false;
+                            break;
+                        case 'no-speech':
+                            errorMessage = 'No speech detected. Try speaking louder.';
+                            break;
+                        case 'audio-capture':
+                            errorMessage = 'No microphone found. Please check your microphone.';
+                            break;
+                        case 'network':
+                            errorMessage = 'Network error. Check your internet connection.';
+                            break;
+                    }
+                    
+                    status.textContent = `Error: ${event.error}. ${errorMessage}`;
+                    micButton.classList.remove('listening', 'processing');
+                    isListening = false;
+                };
+
+                recognition.onend = function() {
+                    micButton.classList.remove('listening');
+                    isListening = false;
+                    updateDebugInfo('Speech recognition ended');
+                    
+                    if (!wakeWordDetected) {
+                        status.textContent = 'Click the microphone and say "Hey Bob"';
+                    }
+                };
+
+                updateDebugInfo('Speech recognition initialized');
             }
 
             // Microphone button click handler
             micButton.addEventListener('click', async function() {
+                updateDebugInfo('Microphone button clicked');
+                
                 if (!permissionGranted) {
                     status.textContent = 'Requesting microphone permission...';
                     const granted = await requestMicrophonePermission();
@@ -316,9 +374,15 @@ def create_voice_interface():
                     initializeSpeechRecognition();
                     setTimeout(() => {
                         status.textContent = 'Click the microphone and say "Hey Bob"';
-                    }, 2000);
+                        wakeStatus.textContent = 'Waiting for "Hey Bob"...';
+                    }, 1000);
                 } else if (!isListening && recognition) {
-                    recognition.start();
+                    try {
+                        recognition.start();
+                    } catch (error) {
+                        updateDebugInfo(`Error starting recognition: ${error.message}`, true);
+                        status.textContent = 'Error starting microphone. Please refresh and try again.';
+                    }
                 }
             });
 
@@ -326,11 +390,13 @@ def create_voice_interface():
             window.addEventListener('message', function(event) {
                 if (event.data.type === 'bot_response') {
                     status.textContent = 'Bob is speaking...';
+                    updateDebugInfo('Received response from Streamlit');
                     
                     // Clean the response for speech
                     let responseText = event.data.response;
                     responseText = responseText.replace(/[*#`]/g, ''); // Remove markdown
                     responseText = responseText.replace(/\n/g, ' '); // Replace newlines with spaces
+                    responseText = responseText.replace(/\s+/g, ' ').trim(); // Clean whitespace
                     
                     // Speak the response
                     const utterance = new SpeechSynthesisUtterance(responseText);
@@ -346,6 +412,7 @@ def create_voice_interface():
                         status.textContent = 'Click the microphone and say "Hey Bob"';
                         micButton.classList.remove('processing');
                         transcript.style.display = 'none';
+                        updateDebugInfo('Ready for next interaction');
                     };
                     
                     speechSynthesis.speak(utterance);
@@ -354,7 +421,16 @@ def create_voice_interface():
 
             // Initialize on page load
             document.addEventListener('DOMContentLoaded', function() {
-                console.log('Voice interface loaded');
+                updateDebugInfo('Page loaded, checking browser support...');
+                
+                if (checkBrowserSupport()) {
+                    status.textContent = 'Click the microphone to start';
+                    wakeStatus.textContent = 'Ready - Click microphone first';
+                    wakeStatus.className = 'wake-word-status wake-waiting';
+                } else {
+                    wakeStatus.textContent = 'Browser not supported';
+                    wakeStatus.className = 'wake-word-status error-info';
+                }
             });
         </script>
     </body>
@@ -366,8 +442,6 @@ def main():
     # Initialize session state
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
-    if 'voice_query' not in st.session_state:
-        st.session_state.voice_query = None
 
     # Custom CSS for better styling
     st.markdown("""
@@ -397,14 +471,13 @@ def main():
     st.markdown('<h1 class="title">🤖 Bob - Voice Assistant</h1>', unsafe_allow_html=True)
     st.markdown('<p class="subtitle">Say "Hey Bob" then ask your question</p>', unsafe_allow_html=True)
     
-    # Voice interface
+    # Voice interface with proper communication
     voice_html = create_voice_interface()
-    components.html(voice_html, height=400)
+    voice_component = components.html(voice_html, height=450)
     
-    # Handle voice queries from JavaScript
-    query = st.query_params.get("voice_query")
-    if query and query != st.session_state.voice_query:
-        st.session_state.voice_query = query
+    # Handle voice queries using component return value
+    if voice_component:
+        query = voice_component
         
         # Get AI response
         ai_response = get_ai_response(query)
@@ -417,16 +490,55 @@ def main():
         })
         
         # Send response back to JavaScript for speech synthesis
-        st.components.v1.html(f"""
+        components.html(f"""
         <script>
         window.parent.postMessage({{
             type: 'bot_response',
-            response: `{ai_response.replace('`', '\\`').replace('$', '\\$')}`
+            response: `{ai_response.replace('`', '\\`').replace('$', '\\$').replace('"', '\\"')}`
         }}, '*');
         </script>
         """, height=0)
     
     st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Troubleshooting section
+    st.markdown("---")
+    st.markdown("### 🔧 Troubleshooting")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **If microphone isn't working:**
+        1. Use Chrome, Edge, or Safari
+        2. Allow microphone permission when prompted
+        3. Check your microphone is working
+        4. Try refreshing the page
+        """)
+    
+    with col2:
+        st.markdown("""
+        **Browser requirements:**
+        - ✅ Chrome (recommended)
+        - ✅ Edge
+        - ✅ Safari
+        - ❌ Firefox (not supported)
+        """)
+    
+    # Test microphone button
+    if st.button("🎙️ Test Microphone Access"):
+        components.html("""
+        <script>
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(function(stream) {
+                stream.getTracks().forEach(track => track.stop());
+                alert('✅ Microphone access successful!');
+            })
+            .catch(function(error) {
+                alert('❌ Microphone access failed: ' + error.message);
+            });
+        </script>
+        """, height=0)
     
     # Conversation history
     if st.session_state.conversation_history:
@@ -438,26 +550,6 @@ def main():
             with st.expander(f"Conversation {len(st.session_state.conversation_history) - i} - {conv['timestamp']}"):
                 st.write(f"**You:** {conv['user']}")
                 st.write(f"**Bob:** {conv['bob']}")
-    
-    # Instructions
-    st.markdown("---")
-    st.markdown("""
-    ### 📝 How to use Bob:
-    
-    1. **Click the microphone** 🎤 
-    2. **Say "Hey Bob"** to wake up the assistant
-    3. **Wait** for Bob to acknowledge you
-    4. **Ask your question** clearly
-    5. **Listen** to Bob's response
-    
-    **Example questions:**
-    - "What's the weather like today?"
-    - "Tell me about aspirin"
-    - "What's 25 times 47?"
-    - "Latest news about technology"
-    
-    **Note:** This uses your browser's built-in speech recognition and text-to-speech.
-    """)
     
     # Clear history button
     if st.session_state.conversation_history:
