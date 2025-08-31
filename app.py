@@ -195,6 +195,18 @@ def main():
     # Step 2: FIXED Voice Interface
     st.markdown("---")
     st.markdown("**🎙️ Step 2: Voice Interface**")
+    
+    # Check HTTPS status and show warning if needed
+    https_check = """
+    <script>
+    if (location.protocol !== 'https:' && !location.hostname.includes('localhost')) {
+        document.write('<div style="background: #ff6b6b; color: white; padding: 15px; border-radius: 10px; margin: 20px 0; text-align: center;"><strong>⚠️ HTTPS Required!</strong><br>Voice input needs HTTPS to work. Deploy to Streamlit Cloud or use localhost for testing.</div>');
+    } else {
+        document.write('<div style="background: #51cf66; color: white; padding: 10px; border-radius: 8px; margin: 10px 0; text-align: center;">✅ HTTPS Enabled - Voice should work!</div>');
+    }
+    </script>
+    """
+    components.html(https_check, height=80)
 
     # Display voice conversation area FIRST
     voice_container = st.container()
