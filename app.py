@@ -1,11 +1,9 @@
 import streamlit as st
-import speech_recognition as sr
-import pyttsx3
 from phi.agent import Agent
 from phi.model.google import Gemini
 from phi.tools.tavily import TavilyTools
-import threading
 import time
+import streamlit.components.v1 as components
 
 # Set page configuration
 st.set_page_config(
@@ -52,78 +50,6 @@ def get_agent():
         st.error(f"❌ Error initializing agent: {e}")
         return None
 
-@st.cache_resource
-def get_tts_engine():
-    """Initialize text-to-speech engine."""
-    try:
-        engine = pyttsx3.init()
-        engine.setProperty('rate', 150)  # Speed of speech
-        engine.setProperty('volume', 0.9)  # Volume level (0.0 to 1.0)
-        return engine
-    except Exception as e:
-        st.error(f"❌ Error initializing TTS engine: {e}")
-        return None
-
-def listen_for_wake_word():
-    """Listen for the wake word 'Hey Bob'."""
-    recognizer = sr.Recognizer()
-    microphone = sr.Microphone()
-    
-    try:
-        with microphone as source:
-            recognizer.adjust_for_ambient_noise(source, duration=1)
-        
-        with microphone as source:
-            st.info("🎤 Listening for 'Hey Bob'...")
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=3)
-        
-        text = recognizer.recognize_google(audio).lower()
-        return "hey bob" in text or "hi bob" in text
-    except sr.WaitTimeoutError:
-        return False
-    except sr.UnknownValueError:
-        return False
-    except sr.RequestError as e:
-        st.error(f"❌ Speech recognition error: {e}")
-        return False
-
-def listen_for_query():
-    """Listen for user query after wake word is detected."""
-    recognizer = sr.Recognizer()
-    microphone = sr.Microphone()
-    
-    try:
-        with microphone as source:
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-        
-        with microphone as source:
-            st.info("🎤 I'm listening... What can I help you with?")
-            audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
-        
-        text = recognizer.recognize_google(audio)
-        return text
-    except sr.WaitTimeoutError:
-        st.warning("⏰ Timeout - I didn't hear anything.")
-        return None
-    except sr.UnknownValueError:
-        st.warning("🤷 Sorry, I couldn't understand what you said.")
-        return None
-    except sr.RequestError as e:
-        st.error(f"❌ Speech recognition error: {e}")
-        return None
-
-def speak_response(text):
-    """Convert text to speech."""
-    try:
-        engine = get_tts_engine()
-        if engine:
-            # Clean the text for better speech
-            clean_text = text.replace('*', '').replace('#', '').replace('`', '')
-            engine.say(clean_text)
-            engine.runAndWait()
-    except Exception as e:
-        st.error(f"❌ Error with text-to-speech: {e}")
-
 def get_ai_response(query):
     """Get response from AI agent."""
     agent = get_agent()
@@ -138,114 +64,290 @@ def get_ai_response(query):
         st.error(f"🚨 Error getting AI response: {e}")
         return "Sorry, I encountered an error while processing your question."
 
+def create_voice_interface():
+    """Create the web-based voice interface using HTML5 Speech Recognition."""
+    html_code = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            .voice-container {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 20px;
+                font-family: Arial, sans-serif;
+            }
+            .microphone {
+                font-size: 120px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                border: none;
+                background: none;
+                color: #4A90E2;
+            }
+            .microphone:hover {
+                transform: scale(1.1);
+                color: #357ABD;
+            }
+            .microphone.listening {
+                color: #E74C3C;
+                animation: pulse 1.5s infinite;
+            }
+            .microphone.processing {
+                color: #F39C12;
+            }
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.2); }
+                100% { transform: scale(1); }
+            }
+            .status {
+                margin-top: 20px;
+                font-size: 18px;
+                text-align: center;
+                min-height: 25px;
+            }
+            .transcript {
+                margin-top: 20px;
+                padding: 15px;
+                background: #f0f0f0;
+                border-radius: 10px;
+                max-width: 500px;
+                text-align: center;
+            }
+            .wake-word-status {
+                margin-top: 10px;
+                padding: 10px;
+                border-radius: 5px;
+                text-align: center;
+                font-weight: bold;
+            }
+            .wake-detected {
+                background: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            .wake-waiting {
+                background: #fff3cd;
+                color: #856404;
+                border: 1px solid #ffeaa7;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="voice-container">
+            <button class="microphone" id="micButton">🎤</button>
+            <div class="status" id="status">Click the microphone and say "Hey Bob"</div>
+            <div class="wake-word-status wake-waiting" id="wakeStatus">Waiting for "Hey Bob"...</div>
+            <div class="transcript" id="transcript" style="display: none;"></div>
+        </div>
+
+        <script>
+            let recognition;
+            let isListening = false;
+            let wakeWordDetected = false;
+            
+            const micButton = document.getElementById('micButton');
+            const status = document.getElementById('status');
+            const transcript = document.getElementById('transcript');
+            const wakeStatus = document.getElementById('wakeStatus');
+
+            // Check for browser support
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+
+                recognition.onstart = function() {
+                    isListening = true;
+                    micButton.classList.add('listening');
+                    if (!wakeWordDetected) {
+                        status.textContent = 'Listening for "Hey Bob"...';
+                    } else {
+                        status.textContent = 'I\'m listening... What can I help you with?';
+                    }
+                };
+
+                recognition.onresult = function(event) {
+                    const text = event.results[0][0].transcript.toLowerCase();
+                    
+                    if (!wakeWordDetected) {
+                        // Check for wake word
+                        if (text.includes('hey bob') || text.includes('hi bob')) {
+                            wakeWordDetected = true;
+                            wakeStatus.textContent = '✅ Wake word detected! Ask your question...';
+                            wakeStatus.className = 'wake-word-status wake-detected';
+                            status.textContent = 'Great! Now ask me anything...';
+                            
+                            // Speak confirmation
+                            const utterance = new SpeechSynthesisUtterance('Hello! What can I help you with?');
+                            utterance.rate = 0.8;
+                            speechSynthesis.speak(utterance);
+                            
+                            // Start listening for the actual query
+                            setTimeout(() => {
+                                if (recognition) {
+                                    recognition.start();
+                                }
+                            }, 2000);
+                        } else {
+                            status.textContent = 'I heard: "' + event.results[0][0].transcript + '" - Please say "Hey Bob"';
+                        }
+                    } else {
+                        // Process the actual query
+                        const query = event.results[0][0].transcript;
+                        transcript.style.display = 'block';
+                        transcript.innerHTML = '<strong>You said:</strong> ' + query;
+                        
+                        // Send query to Streamlit
+                        window.parent.postMessage({
+                            type: 'voice_query',
+                            query: query
+                        }, '*');
+                        
+                        status.textContent = 'Processing your question...';
+                        micButton.classList.remove('listening');
+                        micButton.classList.add('processing');
+                    }
+                };
+
+                recognition.onerror = function(event) {
+                    console.error('Speech recognition error:', event.error);
+                    status.textContent = 'Error: ' + event.error + '. Please try again.';
+                    micButton.classList.remove('listening', 'processing');
+                    isListening = false;
+                };
+
+                recognition.onend = function() {
+                    micButton.classList.remove('listening');
+                    isListening = false;
+                    
+                    if (!wakeWordDetected) {
+                        status.textContent = 'Click the microphone and say "Hey Bob"';
+                    }
+                };
+
+            } else {
+                status.textContent = 'Speech recognition not supported in this browser';
+                micButton.disabled = true;
+            }
+
+            micButton.addEventListener('click', function() {
+                if (!isListening && recognition) {
+                    recognition.start();
+                }
+            });
+
+            // Listen for responses from Streamlit
+            window.addEventListener('message', function(event) {
+                if (event.data.type === 'bot_response') {
+                    status.textContent = 'Bob is speaking...';
+                    
+                    // Speak the response
+                    const utterance = new SpeechSynthesisUtterance(event.data.response);
+                    utterance.rate = 0.8;
+                    utterance.pitch = 1;
+                    utterance.volume = 0.8;
+                    
+                    utterance.onend = function() {
+                        // Reset for next interaction
+                        wakeWordDetected = false;
+                        wakeStatus.textContent = 'Waiting for "Hey Bob"...';
+                        wakeStatus.className = 'wake-word-status wake-waiting';
+                        status.textContent = 'Click the microphone and say "Hey Bob"';
+                        micButton.classList.remove('processing');
+                        transcript.style.display = 'none';
+                    };
+                    
+                    speechSynthesis.speak(utterance);
+                }
+            });
+
+            // Reset function
+            function resetAssistant() {
+                wakeWordDetected = false;
+                isListening = false;
+                wakeStatus.textContent = 'Waiting for "Hey Bob"...';
+                wakeStatus.className = 'wake-word-status wake-waiting';
+                status.textContent = 'Click the microphone and say "Hey Bob"';
+                micButton.classList.remove('listening', 'processing');
+                transcript.style.display = 'none';
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return html_code
+
 def main():
     # Initialize session state
-    if 'is_listening' not in st.session_state:
-        st.session_state.is_listening = False
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
-    if 'wake_word_detected' not in st.session_state:
-        st.session_state.wake_word_detected = False
+    if 'voice_query' not in st.session_state:
+        st.session_state.voice_query = None
 
-    # Custom CSS for styling
+    # Custom CSS for better styling
     st.markdown("""
     <style>
     .main-container {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        min-height: 60vh;
+        text-align: center;
+        padding: 2rem 0;
     }
-    .microphone-button {
-        font-size: 120px;
-        border: none;
-        background: none;
-        cursor: pointer;
-        transition: transform 0.2s;
+    .title {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        background: linear-gradient(45deg, #4A90E2, #357ABD);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
     }
-    .microphone-button:hover {
-        transform: scale(1.1);
-    }
-    .listening {
-        animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.1); }
-        100% { transform: scale(1); }
+    .subtitle {
+        font-size: 1.2rem;
+        color: #666;
+        margin-bottom: 2rem;
     }
     </style>
     """, unsafe_allow_html=True)
 
     # Header
-    st.markdown("<div class='main-container'>", unsafe_allow_html=True)
-    st.title("🎤 Bob - Voice Assistant")
-    st.markdown("*Say 'Hey Bob' to wake me up, then ask your question*")
+    st.markdown('<div class="main-container">', unsafe_allow_html=True)
+    st.markdown('<h1 class="title">🤖 Bob - Voice Assistant</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Say "Hey Bob" then ask your question</p>', unsafe_allow_html=True)
     
-    # Microphone button
-    col1, col2, col3 = st.columns([1, 2, 1])
+    # Voice interface
+    voice_html = create_voice_interface()
+    components.html(voice_html, height=400)
     
-    with col2:
-        # Create a large microphone icon
-        if st.session_state.is_listening:
-            st.markdown("🎤", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center; color: red;'>🔴 Listening...</p>", unsafe_allow_html=True)
-        else:
-            if st.button("🎤", help="Click to start listening for 'Hey Bob'"):
-                st.session_state.is_listening = True
-                st.rerun()
-    
-    # Voice interaction logic
-    if st.session_state.is_listening:
-        # Listen for wake word
-        if not st.session_state.wake_word_detected:
-            if listen_for_wake_word():
-                st.session_state.wake_word_detected = True
-                st.success("👋 Hello! I heard you say 'Hey Bob'. What can I help you with?")
-                speak_response("Hello! What can I help you with?")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.session_state.is_listening = False
-                st.info("💭 I didn't hear 'Hey Bob'. Click the microphone to try again.")
-                st.rerun()
+    # Handle voice queries from JavaScript
+    query = st.query_params.get("voice_query")
+    if query and query != st.session_state.voice_query:
+        st.session_state.voice_query = query
         
-        # Listen for query after wake word
-        elif st.session_state.wake_word_detected:
-            user_query = listen_for_query()
-            
-            if user_query:
-                st.write(f"**You said:** {user_query}")
-                
-                # Get AI response
-                ai_response = get_ai_response(user_query)
-                
-                # Display and speak response
-                st.write(f"**Bob says:** {ai_response}")
-                
-                # Add to conversation history
-                st.session_state.conversation_history.append({
-                    "user": user_query,
-                    "bob": ai_response,
-                    "timestamp": time.strftime("%H:%M:%S")
-                })
-                
-                # Speak the response
-                speak_response(ai_response)
-                
-                # Reset for next interaction
-                st.session_state.is_listening = False
-                st.session_state.wake_word_detected = False
-                
-                st.info("💭 Say 'Hey Bob' again or click the microphone for another question.")
-                
-            else:
-                st.session_state.is_listening = False
-                st.session_state.wake_word_detected = False
-                st.info("💭 Ready for next interaction. Say 'Hey Bob' or click the microphone.")
+        # Get AI response
+        ai_response = get_ai_response(query)
+        
+        # Add to conversation history
+        st.session_state.conversation_history.append({
+            "user": query,
+            "bob": ai_response,
+            "timestamp": time.strftime("%H:%M:%S")
+        })
+        
+        # Send response back to JavaScript for speech synthesis
+        st.components.v1.html(f"""
+        <script>
+        window.parent.postMessage({{
+            type: 'bot_response',
+            response: `{ai_response.replace('`', '\\`').replace('$', '\\$')}`
+        }}, '*');
+        </script>
+        """, height=0)
     
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # Conversation history
     if st.session_state.conversation_history:
@@ -263,16 +365,19 @@ def main():
     st.markdown("""
     ### 📝 How to use Bob:
     
-    1. **Click the microphone** 🎤 or say **"Hey Bob"**
-    2. **Wait** for Bob to acknowledge you
-    3. **Ask your question** clearly
-    4. **Listen** to Bob's response
+    1. **Click the microphone** 🎤 
+    2. **Say "Hey Bob"** to wake up the assistant
+    3. **Wait** for Bob to acknowledge you
+    4. **Ask your question** clearly
+    5. **Listen** to Bob's response
     
     **Example questions:**
     - "What's the weather like today?"
     - "Tell me about aspirin"
     - "What's 25 times 47?"
     - "Latest news about technology"
+    
+    **Note:** This uses your browser's built-in speech recognition and text-to-speech.
     """)
     
     # Clear history button
