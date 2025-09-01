@@ -222,34 +222,17 @@ def main():
         return null;
     }}
 
-    // Send command to Streamlit using session state callback
+    // Send command to Streamlit - Fixed version
     function sendToStreamlit(command) {{
-        // Use Streamlit's session state communication
-        const data = {{
-            query: command,
-            timestamp: Date.now()
-        }};
+        console.log('Sending command to Streamlit:', command);
         
-        // Store in session storage temporarily
-        try {{
-            sessionStorage.setItem('hey_bob_query', JSON.stringify(data));
-            // Trigger Streamlit rerun by changing URL hash
-            window.location.hash = 'voice_command_' + Date.now();
-            
-            // Alternative: Use postMessage to parent window
-            window.parent.postMessage({{
-                type: 'hey_bob_command',
-                command: command
-            }}, '*');
-            
-        }} catch (e) {{
-            console.log('Storage method failed, trying direct method');
-            // Fallback: Use URL parameters
-            const url = new URL(window.location);
-            url.searchParams.set('voice_query', encodeURIComponent(command));
-            url.searchParams.set('t', Date.now());
-            window.location.href = url.toString();
-        }}
+        // Method 1: URL parameters (most reliable for Streamlit Cloud)
+        const url = new URL(window.location);
+        url.searchParams.set('voice_query', encodeURIComponent(command));
+        url.searchParams.set('timestamp', Date.now());
+        
+        // Navigate to trigger Streamlit rerun
+        window.location.href = url.toString();
     }}
 
     // Process voice command
@@ -448,27 +431,31 @@ def main():
 
     components.html(voice_assistant_html, height=450)
 
-    # Enhanced URL parameter processing
+    # Voice Response Output Section - This is where Bob's response will appear
+    if not st.query_params.get("voice_query"):
+        st.markdown("---")
+        st.markdown("### 🎙️ Voice Command Output")
+        st.info("👆 Use the voice interface above, then Bob's response will appear here!")
+
     voice_query = st.query_params.get("voice_query")
     
-    # Also check session state for voice queries
-    if not voice_query and hasattr(st.session_state, 'voice_query') and st.session_state.voice_query:
-        voice_query = st.session_state.voice_query
-        st.session_state.voice_query = None
-
-    # Process voice command
-    if voice_query and not st.session_state.processing_voice:
-        st.session_state.processing_voice = True
+    # Process voice command immediately and display output below voice input
+    if voice_query and not st.session_state.get('last_processed_query') == voice_query:
+        st.session_state.last_processed_query = voice_query
         
-        # Display the command
+        # Display the voice command result section
+        st.markdown("---")
+        st.markdown("### 🎙️ Voice Command Results")
+        
+        # Display what user said
         st.markdown(f'<div class="conversation-bubble">🎙️ <strong>You said:</strong> "Hey Bob, {voice_query}"</div>', unsafe_allow_html=True)
         
-        # Get Bob's response
-        with st.spinner("🤖 Bob is analyzing and preparing response..."):
+        # Get and display Bob's response
+        with st.spinner("🤖 Bob is thinking..."):
             try:
                 ai_response = get_ai_response(voice_query)
                 
-                # Display Bob's response
+                # Display Bob's text response
                 st.markdown(f'<div class="bob-response">🤖 <strong>Bob responds:</strong><br><br>{ai_response}</div>', unsafe_allow_html=True)
                 
                 # Add to conversation history
@@ -479,16 +466,16 @@ def main():
                     "type": "voice"
                 })
                 
-                # Clean response for speech
-                clean_response = ai_response.replace('"', "'").replace('\n', ' ').replace('`', '').replace('*', '').replace('#', '').replace('\\', '')
+                # Clean response for speech synthesis
+                clean_response = ai_response.replace('"', '\\"').replace('\n', ' ').replace('`', '').replace('*', '').replace('#', '').replace('\\', '\\\\')
                 
-                # Voice response component
-                voice_response_html = f"""
-                <div style="text-align: center; margin: 20px 0; padding: 20px; background: #e8f5e8; border-radius: 15px;">
-                    <h3 style="color: #28a745; margin-bottom: 15px;">🔊 Bob's Voice Response</h3>
+                # Voice response controls
+                voice_controls_html = f"""
+                <div style="text-align: center; margin: 20px 0; padding: 20px; background: linear-gradient(135deg, #e8f5e8, #d4edda); border-radius: 15px; border: 2px solid #28a745;">
+                    <h3 style="color: #28a745; margin-bottom: 20px;">🔊 Bob's Voice Response</h3>
                     
                     <div style="margin: 20px 0;">
-                        <button onclick="speakBobResponse()" style="
+                        <button onclick="playBobResponse()" id="playBtn" style="
                             padding: 15px 30px; 
                             background: #28a745; 
                             color: white; 
@@ -497,10 +484,13 @@ def main():
                             cursor: pointer; 
                             font-size: 18px;
                             margin: 10px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                        ">🎙️ Play Response</button>
+                            box-shadow: 0 3px 6px rgba(0,0,0,0.2);
+                            transition: all 0.3s;
+                        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                            🎙️ Play Bob's Response
+                        </button>
                         
-                        <button onclick="restartListening()" style="
+                        <button onclick="askAnother()" style="
                             padding: 15px 30px; 
                             background: #007bff; 
                             color: white; 
@@ -509,97 +499,120 @@ def main():
                             cursor: pointer; 
                             font-size: 18px;
                             margin: 10px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                        ">🎤 Ask Another Question</button>
+                            box-shadow: 0 3px 6px rgba(0,0,0,0.2);
+                            transition: all 0.3s;
+                        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                            🎤 Ask Another Question
+                        </button>
                     </div>
                     
-                    <div id="voiceStatus" style="margin-top: 15px; font-size: 16px; color: #666;"></div>
+                    <div id="voicePlayStatus" style="margin-top: 15px; font-size: 16px; color: #666; min-height: 25px;"></div>
                 </div>
 
                 <script>
-                const bobResponse = `{clean_response}`;
+                const bobResponseText = "{clean_response}";
+                let currentUtterance = null;
                 
-                function speakBobResponse() {{
+                function playBobResponse() {{
+                    const statusDiv = document.getElementById('voicePlayStatus');
+                    const playBtn = document.getElementById('playBtn');
+                    
                     if ('speechSynthesis' in window) {{
-                        // Cancel any ongoing speech
+                        // Stop any ongoing speech
                         speechSynthesis.cancel();
                         
-                        const utterance = new SpeechSynthesisUtterance(bobResponse);
-                        utterance.rate = 0.9;
-                        utterance.pitch = 1.0;
-                        utterance.volume = 1.0;
+                        statusDiv.innerHTML = '🔄 Preparing voice...';
+                        playBtn.disabled = true;
+                        playBtn.innerHTML = '⏳ Loading...';
                         
-                        // Wait for voices to load
-                        function setVoice() {{
+                        currentUtterance = new SpeechSynthesisUtterance(bobResponseText);
+                        currentUtterance.rate = 0.85;
+                        currentUtterance.pitch = 1.0;
+                        currentUtterance.volume = 1.0;
+                        
+                        // Set voice when available
+                        function setupVoice() {{
                             const voices = speechSynthesis.getVoices();
+                            console.log('Available voices:', voices.length);
+                            
                             const preferredVoice = voices.find(voice => 
                                 voice.lang.startsWith('en') && (
                                     voice.name.includes('Google') || 
                                     voice.name.includes('Natural') ||
                                     voice.name.includes('Enhanced') ||
-                                    voice.default
+                                    voice.localService === false
                                 )
-                            );
+                            ) || voices.find(voice => voice.lang.startsWith('en'));
+                            
                             if (preferredVoice) {{
-                                utterance.voice = preferredVoice;
+                                currentUtterance.voice = preferredVoice;
+                                console.log('Using voice:', preferredVoice.name);
                             }}
                         }}
                         
                         if (speechSynthesis.getVoices().length === 0) {{
-                            speechSynthesis.onvoiceschanged = setVoice;
+                            speechSynthesis.onvoiceschanged = setupVoice;
                         }} else {{
-                            setVoice();
+                            setupVoice();
                         }}
                         
-                        utterance.onstart = () => {{
-                            document.getElementById('voiceStatus').innerHTML = '🔊 Bob is speaking...';
+                        currentUtterance.onstart = () => {{
+                            statusDiv.innerHTML = '🔊 Bob is speaking...';
+                            playBtn.innerHTML = '⏸️ Speaking...';
                         }};
                         
-                        utterance.onend = () => {{
-                            document.getElementById('voiceStatus').innerHTML = '✅ Response complete!';
+                        currentUtterance.onend = () => {{
+                            statusDiv.innerHTML = '✅ Response complete! Ready for next question.';
+                            playBtn.disabled = false;
+                            playBtn.innerHTML = '🎙️ Play Again';
                             setTimeout(() => {{
-                                document.getElementById('voiceStatus').innerHTML = '';
-                            }}, 3000);
+                                statusDiv.innerHTML = '';
+                            }}, 4000);
                         }};
                         
-                        utterance.onerror = (event) => {{
-                            document.getElementById('voiceStatus').innerHTML = '❌ Voice error: ' + event.error;
+                        currentUtterance.onerror = (event) => {{
+                            statusDiv.innerHTML = '❌ Voice error: ' + event.error;
+                            playBtn.disabled = false;
+                            playBtn.innerHTML = '🎙️ Try Again';
+                            console.error('Speech error:', event.error);
                         }};
                         
-                        speechSynthesis.speak(utterance);
+                        // Start speaking
+                        setTimeout(() => {{
+                            speechSynthesis.speak(currentUtterance);
+                        }}, 500);
+                        
                     }} else {{
-                        document.getElementById('voiceStatus').innerHTML = '❌ Text-to-speech not available';
+                        statusDiv.innerHTML = '❌ Text-to-speech not supported in this browser';
+                        playBtn.disabled = false;
                     }}
                 }}
                 
-                function restartListening() {{
-                    // Clear parameters and reload
+                function askAnother() {{
+                    // Clear the current query and reload page for new voice input
                     const url = new URL(window.location);
                     url.search = '';
                     url.hash = '';
                     window.location.href = url.toString();
                 }}
                 
-                // Auto-play Bob's response after a short delay
+                // Auto-play Bob's response
                 setTimeout(() => {{
-                    speakBobResponse();
-                }}, 1500);
+                    playBobResponse();
+                }}, 1000);
                 </script>
                 """
                 
-                components.html(voice_response_html, height=250)
-                
-                # Clear URL parameters to prevent reprocessing
-                st.query_params.clear()
-                st.session_state.processing_voice = False
+                components.html(voice_controls_html, height=300)
                 
             except Exception as e:
                 st.error(f"❌ Error getting Bob's response: {e}")
-                st.session_state.processing_voice = False
-
-    # Reset processing flag if no voice query
-    elif not voice_query:
-        st.session_state.processing_voice = False
+                
+        # Clear URL parameters after processing to prevent reprocessing
+        if st.button("🔄 Clear and Start Fresh"):
+            st.query_params.clear()
+            st.session_state.last_processed_query = None
+            st.rerun()
 
     # Manual text input for testing
     st.markdown("---")
